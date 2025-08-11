@@ -14,18 +14,60 @@ The best CSV analyst that pulls everything into DuckDB in order to provide LLM a
 
 ## Installation
 
+### Local Installation
+
 ```bash
 npm install
 npm run build
 ```
 
+### Docker Installation
+
+#### Prerequisites
+- Docker and Docker Compose installed
+- Access to CSV files on your host system
+
+#### Building and Running
+
+```bash
+# Build the Docker image
+docker build -t quack-mcp .
+
+# Or use docker-compose for easier management
+docker-compose up quack-mcp
+```
+
+#### Development Mode
+
+```bash
+# Run with hot reload for development
+docker-compose up quack-mcp-dev
+```
+
 ## Usage
+
+### Local Usage
 
 The server runs via stdin/stdout transport for MCP protocol:
 
 ```bash
-node dist/index.js
+node src/index.ts
 ```
+
+### Docker Usage
+
+```bash
+# Run with docker-compose (recommended)
+docker-compose up quack-mcp
+
+# Or run directly with Docker
+docker run -it --rm \
+  -v $(pwd)/data:/app/data:ro \
+  -v /path/to/your/csv/files:/app/csv-data:ro \
+  quack-mcp
+```
+
+**Note**: Mount your CSV files as volumes so the container can access them.
 
 ## Available Tools
 
@@ -61,6 +103,35 @@ Perform basic statistical analysis on CSV data.
 **Parameters:**
 - `table_name` (required): Name of the table to analyze
 - `columns` (optional): Specific columns to analyze
+
+### Multi-File CSV Tools
+
+#### `load_multiple_csvs`
+Load multiple CSV files using glob patterns or file lists into DuckDB for analysis.
+
+**Parameters:**
+- `pattern_or_files` (required): Glob pattern (e.g., "data/*.csv", "reports/**/*.csv") or array of specific file paths
+- `table_name` (optional): Name for the combined table (defaults to "multi_csv_data")
+- `union_by_name` (optional): Combine files by column name instead of position (default: false)
+- `include_filename` (optional): Include a filename column to track source file for each row (default: false)
+- `delimiter` (optional): CSV delimiter (default: ",")
+- `header` (optional): Whether CSV files have header rows (default: true)
+
+**Examples:**
+- Load all CSV files in a directory: `"data/*.csv"`
+- Load files recursively: `"reports/**/*.csv"`
+- Load specific files: `["sales_q1.csv", "sales_q2.csv"]`
+- Mix patterns: `["data/sales_*.csv", "archive/legacy_*.csv"]`
+
+#### `discover_csv_files`
+Discover CSV files matching a glob pattern without loading them.
+
+**Parameters:**
+- `pattern` (required): Glob pattern to search for CSV files
+
+**Returns:** List of matching files with metadata (size, modification date, existence status)
+
+**Note:** The existing `load_csv` tool now also supports glob patterns for backward compatibility.
 
 ### Specialized Analysis Tools
 
@@ -117,40 +188,98 @@ Detect anomalies and irregularities in dataset using statistical analysis and bu
 
 ### Prerequisites
 - Claude Code installed and configured
-- Node.js installed on your system
-- Quack MCP server built (`npm install && npm run build`)
+- Either Node.js installed (for local) OR Docker installed (for containerized)
 
-### Configuration
+### Local Configuration
 
-Add the following to your Claude Code MCP configuration file (usually `~/.config/claude-code/mcp_servers.json`):
+For local installation, add the following to your Claude Code MCP configuration file (usually `~/.config/claude-code/mcp_servers.json`):
 
 ```json
 {
   "mcpServers": {
     "quack-csv": {
       "command": "node",
-      "args": ["/absolute/path/to/quack-mcp/dist/index.js"],
+      "args": ["/absolute/path/to/quack-mcp/src/index.ts"],
       "env": {}
     }
   }
 }
 ```
 
-**Important:** Replace `/absolute/path/to/quack-mcp` with the actual full path to your Quack MCP directory.
+### Docker Configuration
+
+For Docker deployment, configure Claude Code to use the containerized server:
+
+```json
+{
+  "mcpServers": {
+    "quack-csv": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-v", "/absolute/path/to/your/csv/files:/app/csv-data:ro",
+        "-v", "/absolute/path/to/quack-mcp/data:/app/data:ro",
+        "quack-mcp"
+      ],
+      "env": {}
+    }
+  }
+}
+```
+
+Or with docker-compose:
+
+```json
+{
+  "mcpServers": {
+    "quack-csv": {
+      "command": "docker-compose",
+      "args": [
+        "-f", "/absolute/path/to/quack-mcp/docker-compose.yml",
+        "run", "--rm", "quack-mcp"
+      ],
+      "env": {},
+      "cwd": "/absolute/path/to/quack-mcp"
+    }
+  }
+}
+```
+
+**Important:** 
+- Replace paths with actual full paths to your directories
+- Ensure CSV files are accessible via volume mounts for Docker setup
+- For Docker setup, build the image first: `docker build -t quack-mcp .`
 
 ### Usage Examples
 
 #### Basic CSV Analysis
+
+**Local:**
 ```
 Load the CSV file at /path/to/your/data.csv
 ```
 
+**Docker:**
+```
+Load the CSV file at /app/csv-data/data.csv
+```
+*(Mount your CSV directory to `/app/csv-data` in Docker configuration)*
+
 #### Expense Analysis
+
+**Local:**
 ```
 I have credit card data at /Users/me/transactions.csv. Load it and run an expense optimization analysis.
 ```
 
+**Docker:**
+```
+I have credit card data at /app/csv-data/transactions.csv. Load it and run an expense optimization analysis.
+```
+
 #### Complex Data Analysis
+
+**Local:**
 ```
 I have sales data at /Users/me/sales_2024.csv. Load it and then:
 1. Show me monthly sales trends
@@ -158,12 +287,71 @@ I have sales data at /Users/me/sales_2024.csv. Load it and then:
 3. Calculate average order value by product category
 ```
 
+**Docker:**
+```
+I have sales data at /app/csv-data/sales_2024.csv. Load it and then:
+1. Show me monthly sales trends
+2. Find the top 10 customers by revenue
+3. Calculate average order value by product category
+```
+
 #### Data Quality Assessment
+
+**Local:**
 ```
 Load /path/to/customer_data.csv and help me understand:
 - How many missing values are in each column
+- What's the distribution of customer ages  
+- Are there any duplicate customer IDs
+```
+
+**Docker:**
+```
+Load /app/csv-data/customer_data.csv and help me understand:
+- How many missing values are in each column
 - What's the distribution of customer ages
 - Are there any duplicate customer IDs
+```
+
+#### Multi-CSV Analysis
+
+**Local:**
+```
+Load all CSV files matching the pattern /path/to/sales_*.csv and combine them into a single table
+```
+
+```
+Load multiple quarterly sales files: ["sales_q1.csv", "sales_q2.csv", "sales_q3.csv", "sales_q4.csv"] with filename tracking
+```
+
+```
+Discover what CSV files are available in /path/to/data/ directory matching the pattern *.csv
+```
+
+**Docker:**
+```
+Load all CSV files in /app/csv-data/reports/ recursively using the pattern /app/csv-data/reports/**/*.csv
+```
+
+```
+Load monthly data files with different schemas using union by name: /app/csv-data/monthly_*.csv
+```
+
+**Advanced Multi-CSV Examples:**
+```
+I have sales data split across multiple files in /path/to/sales/ directory:
+1. Load all files matching sales_2024_*.csv
+2. Include filename column to track data sources
+3. Use union_by_name since some files have extra columns
+4. Analyze total revenue by quarter and source file
+```
+
+```
+Load transaction data from multiple sources:
+- All files in transactions/ directory
+- Include legacy data from archive/2023/
+- Combine using pattern ["transactions/*.csv", "archive/2023/*.csv"]
+- Generate monthly spending report
 ```
 
 ### Available Tools in Claude Code
@@ -194,6 +382,35 @@ Load /path/to/customer_data.csv and help me understand:
 - **Usage**: "Find anomalies in my dataset"
 - **Features**: Statistical outliers, data quality issues, pattern detection
 
+#### `load_multiple_csvs`
+- **Usage**: "Load all CSV files matching data/*.csv pattern"
+- **Features**: Glob patterns, file lists, schema unification, filename tracking
+
+#### `discover_csv_files`
+- **Usage**: "What CSV files are available in the reports/ directory?"
+- **Features**: File discovery, metadata, size and modification info
+
+## Glob Pattern Reference
+
+Multi-CSV tools support glob patterns for flexible file matching:
+
+| Pattern | Description | Example |
+|---------|-------------|---------|
+| `*` | Matches any characters | `sales_*.csv` matches `sales_q1.csv`, `sales_2024.csv` |
+| `**` | Matches directories recursively | `data/**/*.csv` finds CSVs at any depth in `data/` |
+| `?` | Matches single character | `report_?.csv` matches `report_1.csv`, `report_A.csv` |
+| `[abc]` | Matches any character in brackets | `sales_[123].csv` matches `sales_1.csv`, `sales_2.csv`, `sales_3.csv` |
+| `[a-z]` | Matches character range | `file_[a-c].csv` matches `file_a.csv`, `file_b.csv`, `file_c.csv` |
+
+**Example Patterns:**
+- `*.csv` - All CSV files in current directory
+- `data/*.csv` - All CSV files in data directory
+- `reports/**/*.csv` - All CSV files in reports directory and subdirectories
+- `sales_2024_*.csv` - All sales files for 2024
+- `**/monthly_[0-9][0-9].csv` - Monthly files with 2-digit numbers, anywhere in directory tree
+
+**Note:** The `?` wildcard is not supported for S3/remote file reads due to URL encoding issues.
+
 ## Tips for Best Results
 
 ### 1. Use Clear, Natural Language
@@ -217,19 +434,55 @@ Ask for formatted output:
 - "Create a summary table of sales by region"
 - "Show the top 10 results formatted nicely"
 
+### 5. Multi-CSV Best Practices
+When working with multiple CSV files:
+- **Use `union_by_name=true`** when files have different column orders or missing columns
+- **Enable `filename=true`** to track which file each row came from
+- **Use `discover_csv_files`** first to see what files match your pattern
+- **Start with a small pattern** to test schema compatibility before loading all files
+- **Use descriptive table names** when loading multiple datasets
+
+**Examples:**
+- ✅ "Load all sales files with union_by_name and filename tracking"
+- ✅ "First discover what CSV files are in /data/reports/ then load them"
+- ✅ "Load quarterly files and analyze by source file"
+
 ## Troubleshooting
 
 ### Server Not Found
 If Claude Code can't find the MCP server:
+
+**Local Installation:**
 1. Check that the path in your configuration is absolute and correct
-2. Verify `npm run build` completed successfully
+2. Verify Node.js is installed and accessible
 3. Restart Claude Code after configuration changes
 
+**Docker Installation:**
+1. Ensure Docker image is built: `docker build -t quack-mcp .`
+2. Check Docker is running and accessible
+3. Verify volume mount paths are correct and absolute
+4. Restart Claude Code after configuration changes
+
 ### Permission Errors
-If you get file access errors:
+
+**Local Installation:**
 1. Ensure the CSV file path is correct and accessible
 2. Check file permissions
 3. Use absolute paths for CSV files
+
+**Docker Installation:**
+1. Ensure CSV files are mounted as volumes in Docker configuration
+2. Check volume mount paths are correct: `-v /host/path:/app/csv-data:ro`
+3. Verify Docker has permission to access the mounted directories
+4. Use paths relative to container mount points (e.g., `/app/csv-data/file.csv`)
+
+### Container Issues
+
+**Docker-specific problems:**
+1. **Container won't start**: Check Docker logs with `docker logs <container-id>`
+2. **File not found**: Ensure CSV files are properly mounted as volumes
+3. **Permission denied**: Check file permissions on host system
+4. **Memory issues**: DuckDB requires sufficient container memory for large CSV files
 
 ### SQL Errors
 If queries fail:
@@ -239,12 +492,19 @@ If queries fail:
 
 ### Performance Issues
 For large CSV files:
+
+**Both Local and Docker:**
 1. DuckDB is optimized for analytics but very large files may take time to load
 2. Consider using `LIMIT` clauses for initial exploration
 3. The server loads data into memory - ensure sufficient RAM
 
+**Docker-specific:**
+1. Increase container memory limits if needed
+2. Consider mounting CSV files read-only for better performance
+
 ## MCP Client Configuration
 
+### Local Installation
 For other MCP clients, add to your configuration:
 
 ```json
@@ -252,7 +512,42 @@ For other MCP clients, add to your configuration:
   "mcpServers": {
     "quack-mcp": {
       "command": "node",
-      "args": ["/path/to/quack-mcp/dist/index.js"]
+      "args": ["/path/to/quack-mcp/src/index.ts"]
+    }
+  }
+}
+```
+
+### Docker Installation
+For containerized deployment with other MCP clients:
+
+```json
+{
+  "mcpServers": {
+    "quack-mcp": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-v", "/path/to/csv/files:/app/csv-data:ro",
+        "quack-mcp"
+      ]
+    }
+  }
+}
+```
+
+Or with docker-compose:
+
+```json
+{
+  "mcpServers": {
+    "quack-mcp": {
+      "command": "docker-compose",
+      "args": [
+        "-f", "/path/to/quack-mcp/docker-compose.yml",
+        "run", "--rm", "quack-mcp"
+      ],
+      "cwd": "/path/to/quack-mcp"
     }
   }
 }

@@ -120,6 +120,68 @@ class QuackMCPServer {
           },
         },
         {
+          name: 'load_multiple_csvs',
+          description: 'Load multiple CSV files using glob patterns or file lists into DuckDB for analysis',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              pattern_or_files: {
+                oneOf: [
+                  {
+                    type: 'string',
+                    description: 'Glob pattern to match CSV files (e.g., "*.csv", "data/**/*.csv")',
+                  },
+                  {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Array of specific file paths to load',
+                  },
+                ],
+                description: 'Glob pattern or array of file paths to load',
+              },
+              table_name: {
+                type: 'string',
+                description: 'Name for the combined table (optional, defaults to "multi_csv_data")',
+              },
+              union_by_name: {
+                type: 'boolean',
+                description: 'Combine files by column name instead of position (default: false)',
+                default: false,
+              },
+              include_filename: {
+                type: 'boolean',
+                description: 'Include a filename column to track source file for each row (default: false)',
+                default: false,
+              },
+              delimiter: {
+                type: 'string',
+                description: 'CSV delimiter (default: ",")',
+                default: ',',
+              },
+              header: {
+                type: 'boolean',
+                description: 'Whether CSV files have header rows (default: true)',
+                default: true,
+              },
+            },
+            required: ['pattern_or_files'],
+          },
+        },
+        {
+          name: 'discover_csv_files',
+          description: 'Discover CSV files matching a glob pattern',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              pattern: {
+                type: 'string',
+                description: 'Glob pattern to search for CSV files (e.g., "*.csv", "data/**/*.csv")',
+              },
+            },
+            required: ['pattern'],
+          },
+        },
+        {
           name: 'optimize_expenses',
           description: 'Analyze credit card spending data to identify expense optimization opportunities with actionable recommendations and savings estimates',
           inputSchema: {
@@ -194,6 +256,10 @@ class QuackMCPServer {
           return await this.listTables();
         case 'analyze_csv':
           return await this.analyzeCSV(request.params.arguments);
+        case 'load_multiple_csvs':
+          return await this.loadMultipleCSVs(request.params.arguments);
+        case 'discover_csv_files':
+          return await this.discoverCSVFiles(request.params.arguments);
         case 'optimize_expenses':
           return await this.optimizeExpenses(request.params.arguments);
         case 'detect_anomalies':
@@ -209,49 +275,128 @@ class QuackMCPServer {
 
   async loadCSV(args: any) {
     try {
-      const { file_path, table_name, header = true } = args;
+      const { file_path, table_name, header = true, delimiter } = args;
 
-      // Check if file exists
-      await fs.access(file_path);
-
-      const tableName = table_name || path.basename(file_path, path.extname(file_path)).replace(/[^a-zA-Z0-9_]/g, '_');
-
-      // Try simple CSV loading with properly escaped path
-      const escapedPath = file_path.replace(/'/g, "''");
-      const query = `
-        CREATE OR REPLACE TABLE "${tableName}" AS 
-        SELECT * FROM read_csv('${escapedPath}', 
-          header=${header}
-        )
-      `;
-
-      console.error('Executing query:', query);
-      await this.executeQuery(query);
+      // Detect if file_path contains glob patterns
+      const isGlobPattern = file_path.includes('*') || file_path.includes('?') || file_path.includes('[');
       
-      // Check if the table has any rows
-      const rowCountQuery = `SELECT COUNT(*) as row_count FROM "${tableName}"`;
-      const rowCountResult = await this.executeQuery(rowCountQuery);
-      const rowCount = Number(rowCountResult[0]?.row_count || 0);
-      
-      if (rowCount === 0) {
-        // Drop the empty table to clean up
-        await this.executeQuery(`DROP TABLE IF EXISTS "${tableName}"`);
-        throw new Error('CSV file is empty or contains no valid data');
+      if (isGlobPattern) {
+        // Use glob pattern - first discover files
+        const globQuery = `SELECT file FROM glob('${file_path.replace(/'/g, "''")}')`;
+        const globResult = await this.executeQuery(globQuery);
+        const discoveredFiles = globResult.map((row: any) => row.file);
+        
+        if (discoveredFiles.length === 0) {
+          throw new Error(`No CSV files found matching pattern: ${file_path}`);
+        }
+
+        // Generate table name from pattern if not provided
+        const tableName = table_name || `csv_${file_path.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+
+        // Build query for multiple files
+        const escapedPath = file_path.replace(/'/g, "''");
+        let query: string;
+        
+        if (delimiter) {
+          query = `
+            CREATE OR REPLACE TABLE "${tableName}" AS 
+            SELECT * FROM read_csv('${escapedPath}', 
+              header=${header},
+              delim='${delimiter}'
+            )
+          `;
+        } else {
+          query = `
+            CREATE OR REPLACE TABLE "${tableName}" AS 
+            SELECT * FROM read_csv('${escapedPath}', 
+              header=${header}
+            )
+          `;
+        }
+
+        console.error('Executing glob CSV query:', query);
+        await this.executeQuery(query);
+        
+        // Check if the table has any rows
+        const rowCountQuery = `SELECT COUNT(*) as row_count FROM "${tableName}"`;
+        const rowCountResult = await this.executeQuery(rowCountQuery);
+        const rowCount = Number(rowCountResult[0]?.row_count || 0);
+        
+        if (rowCount === 0) {
+          await this.executeQuery(`DROP TABLE IF EXISTS "${tableName}"`);
+          throw new Error('No data was loaded from the CSV files');
+        }
+        
+        this.loadedTables.set(tableName, file_path);
+
+        // Automatically inspect the schema and data
+        const schemaInfo = await this.inspectTableSchema(tableName);
+        
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Successfully loaded ${discoveredFiles.length} CSV files matching "${file_path}" as table "${tableName}"\n\nFiles: ${discoveredFiles.slice(0, 5).join(', ')}${discoveredFiles.length > 5 ? '...' : ''}\n\n${schemaInfo}`,
+            },
+          ],
+        };
+      } else {
+        // Single file mode (original behavior)
+        
+        // Check if file exists
+        await fs.access(file_path);
+
+        const tableName = table_name || path.basename(file_path, path.extname(file_path)).replace(/[^a-zA-Z0-9_]/g, '_');
+
+        // Build query for single file
+        const escapedPath = file_path.replace(/'/g, "''");
+        let query: string;
+        
+        if (delimiter) {
+          query = `
+            CREATE OR REPLACE TABLE "${tableName}" AS 
+            SELECT * FROM read_csv('${escapedPath}', 
+              header=${header},
+              delim='${delimiter}'
+            )
+          `;
+        } else {
+          query = `
+            CREATE OR REPLACE TABLE "${tableName}" AS 
+            SELECT * FROM read_csv('${escapedPath}', 
+              header=${header}
+            )
+          `;
+        }
+
+        console.error('Executing single CSV query:', query);
+        await this.executeQuery(query);
+        
+        // Check if the table has any rows
+        const rowCountQuery = `SELECT COUNT(*) as row_count FROM "${tableName}"`;
+        const rowCountResult = await this.executeQuery(rowCountQuery);
+        const rowCount = Number(rowCountResult[0]?.row_count || 0);
+        
+        if (rowCount === 0) {
+          // Drop the empty table to clean up
+          await this.executeQuery(`DROP TABLE IF EXISTS "${tableName}"`);
+          throw new Error('CSV file is empty or contains no valid data');
+        }
+        
+        this.loadedTables.set(tableName, file_path);
+
+        // Automatically inspect the schema and data
+        const schemaInfo = await this.inspectTableSchema(tableName);
+        
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Successfully loaded CSV file "${file_path}" as table "${tableName}"\n\n${schemaInfo}`,
+            },
+          ],
+        };
       }
-      
-      this.loadedTables.set(tableName, file_path);
-
-      // Automatically inspect the schema and data
-      const schemaInfo = await this.inspectTableSchema(tableName);
-      
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Successfully loaded CSV file "${file_path}" as table "${tableName}"\n\n${schemaInfo}`,
-          },
-        ],
-      };
     } catch (error) {
       throw new McpError(
         ErrorCode.InternalError,
@@ -364,6 +509,174 @@ class QuackMCPServer {
       throw new McpError(
         ErrorCode.InternalError,
         `Analysis failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  private async loadMultipleCSVs(args: any) {
+    try {
+      const {
+        pattern_or_files,
+        table_name = 'multi_csv_data',
+        union_by_name = false,
+        include_filename = false,
+        delimiter = ',',
+        header = true
+      } = args;
+
+      // Validate table name
+      const tableName = table_name.replace(/[^a-zA-Z0-9_]/g, '_');
+
+      let fileSpec: string;
+      let discoveredFiles: string[] = [];
+
+      if (typeof pattern_or_files === 'string') {
+        fileSpec = pattern_or_files;
+        // Discover files if it's a glob pattern
+        if (pattern_or_files.includes('*') || pattern_or_files.includes('?') || pattern_or_files.includes('[')) {
+          const globQuery = `SELECT file FROM glob('${pattern_or_files.replace(/'/g, "''")}')`;
+          const globResult = await this.executeQuery(globQuery);
+          discoveredFiles = globResult.map((row: any) => row.file);
+          
+          if (discoveredFiles.length === 0) {
+            throw new Error(`No CSV files found matching pattern: ${pattern_or_files}`);
+          }
+        }
+      } else if (Array.isArray(pattern_or_files)) {
+        // For arrays, we'll create a list format that DuckDB can handle
+        fileSpec = JSON.stringify(pattern_or_files);
+        discoveredFiles = pattern_or_files;
+        
+        // Check if all files exist
+        for (const filePath of pattern_or_files) {
+          try {
+            await fs.access(filePath);
+          } catch (error) {
+            throw new Error(`File not found: ${filePath}`);
+          }
+        }
+      } else {
+        throw new Error('pattern_or_files must be a string (glob pattern) or array of file paths');
+      }
+
+      // Build the DuckDB query based on input type
+      let query: string;
+      const escapedFileSpec = typeof pattern_or_files === 'string' 
+        ? pattern_or_files.replace(/'/g, "''")
+        : pattern_or_files;
+
+      if (typeof pattern_or_files === 'string') {
+        // Use direct string for glob patterns
+        query = `
+          CREATE OR REPLACE TABLE "${tableName}" AS 
+          SELECT * FROM read_csv('${escapedFileSpec}',
+            header=${header},
+            delim='${delimiter}',
+            union_by_name=${union_by_name},
+            filename=${include_filename}
+          )
+        `;
+      } else {
+        // Use array format for file lists
+        const fileList = pattern_or_files.map(f => `'${f.replace(/'/g, "''")}'`).join(', ');
+        query = `
+          CREATE OR REPLACE TABLE "${tableName}" AS 
+          SELECT * FROM read_csv([${fileList}],
+            header=${header},
+            delim='${delimiter}',
+            union_by_name=${union_by_name},
+            filename=${include_filename}
+          )
+        `;
+      }
+
+      console.error('Executing multi-CSV query:', query);
+      await this.executeQuery(query);
+
+      // Check if the table has any rows
+      const rowCountQuery = `SELECT COUNT(*) as row_count FROM "${tableName}"`;
+      const rowCountResult = await this.executeQuery(rowCountQuery);
+      const rowCount = Number(rowCountResult[0]?.row_count || 0);
+
+      if (rowCount === 0) {
+        await this.executeQuery(`DROP TABLE IF EXISTS "${tableName}"`);
+        throw new Error('No data was loaded from the CSV files');
+      }
+
+      // Store the table reference
+      this.loadedTables.set(tableName, typeof pattern_or_files === 'string' ? pattern_or_files : pattern_or_files.join(', '));
+
+      // Get schema and sample information
+      const schemaInfo = await this.inspectTableSchema(tableName);
+      
+      const fileCountText = discoveredFiles.length > 0 
+        ? `${discoveredFiles.length} files` 
+        : 'multiple files';
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Successfully loaded ${fileCountText} as table "${tableName}"\n\nFiles processed: ${discoveredFiles.length > 0 ? discoveredFiles.slice(0, 10).join(', ') + (discoveredFiles.length > 10 ? '...' : '') : 'matched by pattern'}\n\n${schemaInfo}`,
+          },
+        ],
+      };
+    } catch (error) {
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Multi-CSV loading failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  private async discoverCSVFiles(args: any) {
+    try {
+      const { pattern } = args;
+
+      // Use DuckDB's glob function to find matching files
+      const query = `SELECT file FROM glob('${pattern.replace(/'/g, "''")}') ORDER BY file`;
+      const result = await this.executeQuery(query);
+      
+      const files = result.map((row: any) => row.file);
+      
+      // Get additional file info if possible
+      const fileInfo = await Promise.all(files.map(async (filePath: string) => {
+        try {
+          const stats = await fs.stat(filePath);
+          return {
+            path: filePath,
+            size: stats.size,
+            modified: stats.mtime.toISOString(),
+            exists: true
+          };
+        } catch (error) {
+          return {
+            path: filePath,
+            size: 0,
+            modified: null,
+            exists: false,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          };
+        }
+      }));
+
+      const totalSize = fileInfo.reduce((sum, info) => sum + (info.exists ? info.size : 0), 0);
+      const existingFiles = fileInfo.filter(info => info.exists);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Found ${files.length} files matching pattern "${pattern}"\n\nExisting files: ${existingFiles.length}\nTotal size: ${(totalSize / 1024 / 1024).toFixed(2)} MB\n\nFile Details:\n${fileInfo.map(info => 
+              `- ${info.path} (${info.exists ? `${(info.size / 1024).toFixed(1)} KB, modified: ${info.modified}` : 'NOT FOUND'})`
+            ).join('\n')}`,
+          },
+        ],
+      };
+    } catch (error) {
+      throw new McpError(
+        ErrorCode.InternalError,
+        `CSV file discovery failed: ${error instanceof Error ? error.message : String(error)}`
       );
     }
   }
