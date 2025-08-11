@@ -149,6 +149,37 @@ class QuackMCPServer {
             required: ['table_name'],
           },
         },
+        {
+          name: 'detect_anomalies',
+          description: 'Detect anomalies and irregularities in dataset using statistical analysis and business logic rules',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              table_name: {
+                type: 'string',
+                description: 'Name of the table to analyze for anomalies',
+              },
+              severity_threshold: {
+                type: 'string',
+                description: 'Minimum severity level to report (low, medium, high, critical)',
+                default: 'medium',
+                enum: ['low', 'medium', 'high', 'critical'],
+              },
+              focus_columns: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Specific columns to focus anomaly detection on (optional)',
+              },
+              anomaly_types: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Types of anomalies to detect: statistical, duplicates, nulls, outliers, patterns, business_logic',
+                default: ['statistical', 'duplicates', 'nulls', 'outliers', 'patterns'],
+              },
+            },
+            required: ['table_name'],
+          },
+        },
       ],
     }));
 
@@ -166,6 +197,8 @@ class QuackMCPServer {
           return await this.analyzeCSV(request.params.arguments);
         case 'optimize_expenses':
           return await this.optimizeExpenses(request.params.arguments);
+        case 'detect_anomalies':
+          return await this.detectAnomalies(request.params.arguments);
         default:
           throw new McpError(
             ErrorCode.MethodNotFound,
@@ -354,6 +387,457 @@ class QuackMCPServer {
         `Expense optimization failed: ${error instanceof Error ? error.message : String(error)}`
       );
     }
+  }
+
+  async detectAnomalies(args: any) {
+    try {
+      const { 
+        table_name, 
+        severity_threshold = 'medium',
+        focus_columns = [],
+        anomaly_types = ['statistical', 'duplicates', 'nulls', 'outliers', 'patterns']
+      } = args;
+
+      const report = await this.generateAnomalyReport(
+        table_name, 
+        severity_threshold,
+        focus_columns,
+        anomaly_types
+      );
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: report,
+          },
+        ],
+      };
+    } catch (error) {
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Anomaly detection failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  private async generateAnomalyReport(
+    tableName: string, 
+    severityThreshold: string, 
+    focusColumns: string[],
+    anomalyTypes: string[]
+  ): Promise<string> {
+    const anomalies: any[] = [];
+    const sevOrder = { low: 1, medium: 2, high: 3, critical: 4 };
+    const minSeverity = sevOrder[severityThreshold as keyof typeof sevOrder] || 2;
+
+    // Get table schema for analysis
+    const schema = await this.executeQuery(`DESCRIBE ${tableName}`);
+    const totalRows = (await this.executeQuery(`SELECT COUNT(*) as count FROM ${tableName}`))[0].count;
+    
+    let report = `# 🔍 Anomaly Detection Report\n**Table:** ${tableName} (${totalRows.toLocaleString()} rows)\n**Severity Threshold:** ${severityThreshold}\n\n`;
+
+    // 1. DUPLICATE DETECTION
+    if (anomalyTypes.includes('duplicates')) {
+      const duplicateQueries = await this.checkDuplicates(tableName, schema, focusColumns);
+      for (const dup of duplicateQueries) {
+        if (sevOrder[dup.severity as keyof typeof sevOrder] >= minSeverity) {
+          anomalies.push(dup);
+        }
+      }
+    }
+
+    // 2. NULL VALUE ANALYSIS  
+    if (anomalyTypes.includes('nulls')) {
+      const nullAnomalies = await this.checkNullValues(tableName, schema, totalRows, focusColumns);
+      for (const null_anomaly of nullAnomalies) {
+        if (sevOrder[null_anomaly.severity as keyof typeof sevOrder] >= minSeverity) {
+          anomalies.push(null_anomaly);
+        }
+      }
+    }
+
+    // 3. STATISTICAL OUTLIERS
+    if (anomalyTypes.includes('statistical') || anomalyTypes.includes('outliers')) {
+      const outlierAnomalies = await this.checkStatisticalOutliers(tableName, schema, focusColumns);
+      for (const outlier of outlierAnomalies) {
+        if (sevOrder[outlier.severity as keyof typeof sevOrder] >= minSeverity) {
+          anomalies.push(outlier);
+        }
+      }
+    }
+
+    // 4. PATTERN ANALYSIS
+    if (anomalyTypes.includes('patterns')) {
+      const patternAnomalies = await this.checkPatternAnomalies(tableName, schema, focusColumns);
+      for (const pattern of patternAnomalies) {
+        if (sevOrder[pattern.severity as keyof typeof sevOrder] >= minSeverity) {
+          anomalies.push(pattern);
+        }
+      }
+    }
+
+    // 5. BUSINESS LOGIC RULES
+    if (anomalyTypes.includes('business_logic')) {
+      const businessAnomalies = await this.checkBusinessLogicAnomalies(tableName, schema);
+      for (const business of businessAnomalies) {
+        if (sevOrder[business.severity as keyof typeof sevOrder] >= minSeverity) {
+          anomalies.push(business);
+        }
+      }
+    }
+
+    // Sort anomalies by severity
+    anomalies.sort((a, b) => sevOrder[b.severity as keyof typeof sevOrder] - sevOrder[a.severity as keyof typeof sevOrder]);
+
+    // Format report
+    if (anomalies.length === 0) {
+      report += `✅ **No anomalies detected** above ${severityThreshold} severity threshold.\n`;
+    } else {
+      const criticalCount = anomalies.filter(a => a.severity === 'critical').length;
+      const highCount = anomalies.filter(a => a.severity === 'high').length;
+      const mediumCount = anomalies.filter(a => a.severity === 'medium').length;
+      const lowCount = anomalies.filter(a => a.severity === 'low').length;
+
+      report += `## 📊 Summary\n`;
+      if (criticalCount > 0) report += `🚨 **Critical:** ${criticalCount} anomalies\n`;
+      if (highCount > 0) report += `⚠️ **High:** ${highCount} anomalies\n`;
+      if (mediumCount > 0) report += `🔶 **Medium:** ${mediumCount} anomalies\n`;
+      if (lowCount > 0) report += `🔵 **Low:** ${lowCount} anomalies\n`;
+
+      report += `\n## 🔍 Detailed Findings\n\n`;
+
+      for (const anomaly of anomalies) {
+        const icon = anomaly.severity === 'critical' ? '🚨' : 
+                    anomaly.severity === 'high' ? '⚠️' : 
+                    anomaly.severity === 'medium' ? '🔶' : '🔵';
+        
+        report += `### ${icon} ${anomaly.title}\n`;
+        report += `**Severity:** ${anomaly.severity.toUpperCase()}\n`;
+        report += `**Impact:** ${anomaly.impact}\n`;
+        if (anomaly.affected_records) report += `**Affected Records:** ${anomaly.affected_records.toLocaleString()}\n`;
+        if (anomaly.percentage) report += `**Percentage:** ${anomaly.percentage}%\n`;
+        report += `**Details:** ${anomaly.description}\n`;
+        if (anomaly.examples) {
+          report += `**Examples:**\n\`\`\`\n${anomaly.examples}\`\`\`\n`;
+        }
+        if (anomaly.recommendation) report += `**Recommendation:** ${anomaly.recommendation}\n`;
+        report += '\n---\n\n';
+      }
+    }
+
+    return report;
+  }
+
+  private async checkDuplicates(tableName: string, schema: any[], focusColumns: string[]): Promise<any[]> {
+    const anomalies: any[] = [];
+    const columnsToCheck = focusColumns.length > 0 ? focusColumns : schema.map(col => col.column_name);
+    
+    for (const column of columnsToCheck.slice(0, 8)) { // Check more columns
+      try {
+        const duplicateQuery = `
+          SELECT ${column}, COUNT(*) as duplicate_count
+          FROM ${tableName} 
+          WHERE ${column} IS NOT NULL
+          GROUP BY ${column}
+          HAVING COUNT(*) > 1
+          ORDER BY duplicate_count DESC
+          LIMIT 10
+        `;
+        
+        const duplicates = await this.executeQuery(duplicateQuery);
+        
+        if (duplicates.length > 0) {
+          const totalDuplicateRecords = duplicates.reduce((sum, dup) => sum + Number(dup.duplicate_count || 0), 0);
+          const maxDuplicates = Math.max(...duplicates.map(d => Number(d.duplicate_count || 0)));
+          
+          let severity = 'low';
+          if (maxDuplicates > 50000) severity = 'critical'; // Lowered from 1000 to catch tracking number issue
+          else if (maxDuplicates > 1000) severity = 'high';  
+          else if (maxDuplicates > 10) severity = 'medium';
+          else if (maxDuplicates > 1) severity = 'low'; // Report any duplicates
+
+          const examples = duplicates.slice(0, 3).map(d => 
+            `${Object.values(d)[0]}: ${d.duplicate_count} occurrences`
+          ).join('\n');
+
+          anomalies.push({
+            type: 'duplicate',
+            severity,
+            title: `Duplicate Values in ${column}`,
+            impact: 'Data integrity, potential processing errors',
+            affected_records: totalDuplicateRecords,
+            description: `Found ${duplicates.length} unique values with duplicates, max ${maxDuplicates} occurrences`,
+            examples,
+            recommendation: maxDuplicates > 1000 ? 'URGENT: Investigate data corruption, tracking number system failure' : 'Review business logic for duplicates'
+          });
+        }
+      } catch (e) {
+        // Skip columns that can't be analyzed
+      }
+    }
+
+    return anomalies;
+  }
+
+  private async checkNullValues(tableName: string, schema: any[], totalRows: number, focusColumns: string[]): Promise<any[]> {
+    const anomalies: any[] = [];
+    const columnsToCheck = focusColumns.length > 0 ? focusColumns : schema.map(col => col.column_name);
+
+    for (const column of columnsToCheck) {
+      try {
+        const nullQuery = `
+          SELECT 
+            COUNT(*) - COUNT(${column.column_name}) as null_count,
+            ROUND((COUNT(*) - COUNT(${column.column_name})) * 100.0 / COUNT(*), 2) as null_percentage
+          FROM ${tableName}
+        `;
+        
+        const result = await this.executeQuery(nullQuery);
+        const nullCount = result[0]?.null_count || 0;
+        const nullPercentage = result[0]?.null_percentage || 0;
+
+        if (nullCount > 0) {
+          let severity = 'low';
+          if (nullPercentage > 50) severity = 'critical';
+          else if (nullPercentage > 25) severity = 'high';
+          else if (nullPercentage > 10) severity = 'medium';
+
+          if (severity !== 'low' || nullCount > 100) {
+            anomalies.push({
+              type: 'null_values',
+              severity,
+              title: `High Null Rate in ${column.column_name}`,
+              impact: 'Data completeness, analysis accuracy',
+              affected_records: nullCount,
+              percentage: nullPercentage,
+              description: `${nullCount} null values (${nullPercentage}% of total)`,
+              recommendation: nullPercentage > 25 ? 'Investigate data source, implement validation' : 'Consider default values or imputation'
+            });
+          }
+        }
+      } catch (e) {
+        // Skip columns that can't be analyzed
+      }
+    }
+
+    return anomalies;
+  }
+
+  private async checkStatisticalOutliers(tableName: string, schema: any[], focusColumns: string[]): Promise<any[]> {
+    const anomalies: any[] = [];
+    const numericColumns = schema.filter(col => 
+      ['DOUBLE', 'BIGINT', 'INTEGER', 'DECIMAL'].includes(col.column_type.toUpperCase())
+    );
+    
+    const columnsToCheck = focusColumns.length > 0 
+      ? numericColumns.filter(col => focusColumns.includes(col.column_name))
+      : numericColumns;
+
+    for (const column of columnsToCheck.slice(0, 5)) {
+      try {
+        const statsQuery = `
+          SELECT 
+            AVG(${column.column_name}) as mean,
+            MIN(${column.column_name}) as min_val,
+            MAX(${column.column_name}) as max_val,
+            STDDEV(${column.column_name}) as stddev,
+            COUNT(*) as total_count
+          FROM ${tableName} 
+          WHERE ${column.column_name} IS NOT NULL
+        `;
+        
+        const stats = await this.executeQuery(statsQuery);
+        const { mean, min_val, max_val, stddev, total_count } = stats[0] || {};
+
+        if (stddev && stddev > 0) {
+          // Check for values beyond 3 standard deviations
+          const outlierQuery = `
+            SELECT COUNT(*) as outlier_count
+            FROM ${tableName}
+            WHERE ${column.column_name} IS NOT NULL 
+              AND (${column.column_name} > ${mean + 3 * stddev} OR ${column.column_name} < ${mean - 3 * stddev})
+          `;
+          
+          const outlierResult = await this.executeQuery(outlierQuery);
+          const outlierCount = outlierResult[0]?.outlier_count || 0;
+          const outlierPercentage = (outlierCount / total_count) * 100;
+
+          if (outlierCount > 0) {
+            let severity = 'low';
+            if (outlierPercentage > 5) severity = 'high';
+            else if (outlierPercentage > 1) severity = 'medium';
+
+            // Get examples of outliers
+            const exampleQuery = `
+              SELECT ${column.column_name}
+              FROM ${tableName}
+              WHERE ${column.column_name} IS NOT NULL 
+                AND (${column.column_name} > ${mean + 3 * stddev} OR ${column.column_name} < ${mean - 3 * stddev})
+              ORDER BY ABS(${column.column_name} - ${mean}) DESC
+              LIMIT 5
+            `;
+            
+            const examples = await this.executeQuery(exampleQuery);
+            const exampleText = examples.map(e => `${e[column.column_name]}`).join(', ');
+
+            anomalies.push({
+              type: 'statistical_outlier',
+              severity,
+              title: `Statistical Outliers in ${column.column_name}`,
+              impact: 'Potential data quality issues, skewed analysis',
+              affected_records: outlierCount,
+              percentage: Math.round(outlierPercentage * 100) / 100,
+              description: `${outlierCount} values beyond 3σ (mean: ${Math.round(mean * 100) / 100}, σ: ${Math.round(stddev * 100) / 100})`,
+              examples: `Range: ${min_val} to ${max_val}\nOutlier examples: ${exampleText}`,
+              recommendation: 'Investigate extreme values, consider data validation rules'
+            });
+          }
+        }
+      } catch (e) {
+        // Skip columns that can't be analyzed
+      }
+    }
+
+    return anomalies;
+  }
+
+  private async checkPatternAnomalies(tableName: string, schema: any[], focusColumns: string[]): Promise<any[]> {
+    const anomalies: any[] = [];
+    
+    // Check for suspicious patterns in string columns
+    const stringColumns = schema.filter(col => 
+      col.column_type.toUpperCase().includes('VARCHAR') || col.column_type.toUpperCase().includes('TEXT')
+    );
+    
+    const columnsToCheck = focusColumns.length > 0 
+      ? stringColumns.filter(col => focusColumns.includes(col.column_name))
+      : stringColumns.slice(0, 3); // Limit to prevent excessive queries
+
+    for (const column of columnsToCheck) {
+      try {
+        // Check for unusual length patterns
+        const lengthQuery = `
+          SELECT 
+            LENGTH(${column.column_name}) as str_length,
+            COUNT(*) as count
+          FROM ${tableName}
+          WHERE ${column.column_name} IS NOT NULL
+          GROUP BY LENGTH(${column.column_name})
+          ORDER BY count DESC
+          LIMIT 20
+        `;
+        
+        const lengthResults = await this.executeQuery(lengthQuery);
+        
+        // Look for extremely short or long values
+        const extremeLengths = lengthResults.filter(r => r.str_length > 200 || r.str_length < 1);
+        if (extremeLengths.length > 0) {
+          const affectedCount = extremeLengths.reduce((sum, r) => sum + r.count, 0);
+          
+          anomalies.push({
+            type: 'length_pattern',
+            severity: affectedCount > 100 ? 'medium' : 'low',
+            title: `Unusual Length Patterns in ${column.column_name}`,
+            impact: 'Potential data truncation or corruption',
+            affected_records: affectedCount,
+            description: `Found values with extreme lengths`,
+            examples: extremeLengths.map(r => `Length ${r.str_length}: ${r.count} records`).join('\n'),
+            recommendation: 'Review data input validation and field constraints'
+          });
+        }
+      } catch (e) {
+        // Skip columns that can't be analyzed
+      }
+    }
+
+    return anomalies;
+  }
+
+  private async checkBusinessLogicAnomalies(tableName: string, schema: any[]): Promise<any[]> {
+    const anomalies: any[] = [];
+    
+    // Generic business logic checks
+    try {
+      // Check for zero/negative values in amount columns
+      const amountColumns = schema.filter(col => 
+        col.column_name.toLowerCase().includes('amount') || 
+        col.column_name.toLowerCase().includes('charge') ||
+        col.column_name.toLowerCase().includes('price')
+      );
+
+      for (const column of amountColumns) {
+        const negativeQuery = `
+          SELECT COUNT(*) as negative_count
+          FROM ${tableName}
+          WHERE ${column.column_name} < 0
+        `;
+        
+        const zeroQuery = `
+          SELECT COUNT(*) as zero_count  
+          FROM ${tableName}
+          WHERE ${column.column_name} = 0
+        `;
+        
+        const [negativeResult, zeroResult] = await Promise.all([
+          this.executeQuery(negativeQuery),
+          this.executeQuery(zeroQuery)
+        ]);
+        
+        const negativeCount = negativeResult[0]?.negative_count || 0;
+        const zeroCount = zeroResult[0]?.zero_count || 0;
+        
+        if (zeroCount > 50) {
+          anomalies.push({
+            type: 'business_logic',
+            severity: zeroCount > 500 ? 'high' : 'medium',
+            title: `Excessive Zero Values in ${column.column_name}`,
+            impact: 'Revenue loss, processing errors',
+            affected_records: zeroCount,
+            description: `${zeroCount} records with zero charges - potential pricing or billing errors`,
+            recommendation: 'Review billing logic and pricing rules'
+          });
+        }
+      }
+
+      // Check for date consistency
+      const dateColumns = schema.filter(col => 
+        col.column_type.toUpperCase().includes('DATE') || col.column_type.toUpperCase().includes('TIMESTAMP')
+      );
+
+      if (dateColumns.length >= 2) {
+        // Check for impossible date sequences (e.g., end before start)
+        const dateColumn1 = dateColumns[0].column_name;
+        const dateColumn2 = dateColumns[1].column_name;
+        
+        const dateOrderQuery = `
+          SELECT COUNT(*) as invalid_order_count
+          FROM ${tableName}
+          WHERE ${dateColumn1} IS NOT NULL AND ${dateColumn2} IS NOT NULL
+            AND ${dateColumn1} > ${dateColumn2}
+        `;
+        
+        const invalidOrderResult = await this.executeQuery(dateOrderQuery);
+        const invalidOrderCount = invalidOrderResult[0]?.invalid_order_count || 0;
+        
+        if (invalidOrderCount > 0) {
+          anomalies.push({
+            type: 'business_logic',
+            severity: invalidOrderCount > 100 ? 'high' : 'medium',
+            title: `Invalid Date Sequence`,
+            impact: 'Data integrity, timeline analysis errors',
+            affected_records: invalidOrderCount,
+            description: `${invalidOrderCount} records where ${dateColumn1} > ${dateColumn2}`,
+            recommendation: 'Review data entry process and add validation constraints'
+          });
+        }
+      }
+
+    } catch (e) {
+      // Skip business logic checks that fail
+    }
+
+    return anomalies;
   }
 
   private async inspectTableSchema(tableName: string): Promise<string> {
