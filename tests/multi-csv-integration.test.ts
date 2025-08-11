@@ -139,7 +139,7 @@ test('Multi-CSV MCP Integration Tests', async () => {
     for (const file of explicitFiles) {
       try {
         await fs.access(file);
-      } catch (error) {
+      } catch {
         assert.fail(`File should exist: ${file}`);
       }
     }
@@ -197,7 +197,7 @@ test('Multi-CSV MCP Integration Tests', async () => {
     console.log('Testing error scenarios...');
     
     // Test non-existent pattern
-    const nonExistentPattern = path.join(tempDir, 'nonexistent_*.csv');
+    const _nonExistentPattern = path.join(tempDir, 'nonexistent_*.csv');
     const files = await fs.readdir(tempDir);
     const matchingFiles = files.filter(f => f.startsWith('nonexistent_') && f.endsWith('.csv'));
     assert(matchingFiles.length === 0, 'Should find no files for non-existent pattern');
@@ -207,7 +207,7 @@ test('Multi-CSV MCP Integration Tests', async () => {
     try {
       await fs.access(invalidFile);
       assert.fail('Should not find non-existent file');
-    } catch (error) {
+    } catch {
       // Expected to throw
     }
     

@@ -17,13 +17,19 @@ The best CSV analyst that pulls everything into DuckDB in order to provide LLM a
 ### Local Installation
 
 **Prerequisites:**
-- Node.js 24+ (includes native TypeScript support)
+- **Node.js 24+** (required)
 
 ```bash
 npm install
 ```
 
-**Note:** This project leverages Node.js 24's native TypeScript support, eliminating the need for separate compilation steps.
+**Why Node.js 24 is required:**
+- **Native TypeScript support** - Run `.ts` files directly without compilation
+- **Modern ES modules** - Full support for `import`/`export` syntax used throughout the codebase
+- **Built-in test runner** - Uses Node.js native test runner (`node --test`)
+- **Security updates** - Latest security patches and improvements
+
+This eliminates the need for build tools like `tsc`, `ts-node`, or bundlers, making development faster and deployments simpler.
 
 ### Docker Installation
 
