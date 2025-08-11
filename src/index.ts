@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -210,7 +209,7 @@ class QuackMCPServer {
 
   async loadCSV(args: any) {
     try {
-      const { file_path, table_name, delimiter = ',', header = true } = args;
+      const { file_path, table_name, header = true } = args;
 
       // Check if file exists
       await fs.access(file_path);
@@ -228,6 +227,18 @@ class QuackMCPServer {
 
       console.error('Executing query:', query);
       await this.executeQuery(query);
+      
+      // Check if the table has any rows
+      const rowCountQuery = `SELECT COUNT(*) as row_count FROM "${tableName}"`;
+      const rowCountResult = await this.executeQuery(rowCountQuery);
+      const rowCount = Number(rowCountResult[0]?.row_count || 0);
+      
+      if (rowCount === 0) {
+        // Drop the empty table to clean up
+        await this.executeQuery(`DROP TABLE IF EXISTS "${tableName}"`);
+        throw new Error('CSV file is empty or contains no valid data');
+      }
+      
       this.loadedTables.set(tableName, file_path);
 
       // Automatically inspect the schema and data
@@ -534,17 +545,17 @@ class QuackMCPServer {
     const columnsToCheck = focusColumns.length > 0 ? focusColumns : schema.map(col => col.column_name);
     
     for (const column of columnsToCheck.slice(0, 8)) { // Check more columns
+      const duplicateQuery = `
+        SELECT ${column}, COUNT(*) as duplicate_count
+        FROM ${tableName} 
+        WHERE ${column} IS NOT NULL
+        GROUP BY ${column}
+        HAVING COUNT(*) > 1
+        ORDER BY duplicate_count DESC
+        LIMIT 10
+      `;
+      
       try {
-        const duplicateQuery = `
-          SELECT ${column}, COUNT(*) as duplicate_count
-          FROM ${tableName} 
-          WHERE ${column} IS NOT NULL
-          GROUP BY ${column}
-          HAVING COUNT(*) > 1
-          ORDER BY duplicate_count DESC
-          LIMIT 10
-        `;
-        
         const duplicates = await this.executeQuery(duplicateQuery);
         
         if (duplicates.length > 0) {
@@ -572,8 +583,8 @@ class QuackMCPServer {
             recommendation: maxDuplicates > 1000 ? 'URGENT: Investigate data corruption, tracking number system failure' : 'Review business logic for duplicates'
           });
         }
-      } catch (e) {
-        // Skip columns that can't be analyzed
+      } catch (error) {
+        console.error(`Failed to analyze duplicates for column ${column}:`, error);
       }
     }
 
@@ -585,14 +596,14 @@ class QuackMCPServer {
     const columnsToCheck = focusColumns.length > 0 ? focusColumns : schema.map(col => col.column_name);
 
     for (const column of columnsToCheck) {
+      const nullQuery = `
+        SELECT 
+          COUNT(*) - COUNT(${column}) as null_count,
+          ROUND((COUNT(*) - COUNT(${column})) * 100.0 / COUNT(*), 2) as null_percentage
+        FROM ${tableName}
+      `;
+      
       try {
-        const nullQuery = `
-          SELECT 
-            COUNT(*) - COUNT(${column.column_name}) as null_count,
-            ROUND((COUNT(*) - COUNT(${column.column_name})) * 100.0 / COUNT(*), 2) as null_percentage
-          FROM ${tableName}
-        `;
-        
         const result = await this.executeQuery(nullQuery);
         const nullCount = result[0]?.null_count || 0;
         const nullPercentage = result[0]?.null_percentage || 0;
@@ -616,8 +627,8 @@ class QuackMCPServer {
             });
           }
         }
-      } catch (e) {
-        // Skip columns that can't be analyzed
+      } catch (error) {
+        console.error(`Failed to analyze duplicates for column ${column}:`, error);
       }
     }
 
@@ -635,48 +646,72 @@ class QuackMCPServer {
       : numericColumns;
 
     for (const column of columnsToCheck.slice(0, 5)) {
+      const statsQuery = `
+        SELECT 
+          AVG(${column.column_name}) as mean,
+          MIN(${column.column_name}) as min_val,
+          MAX(${column.column_name}) as max_val,
+          STDDEV(${column.column_name}) as stddev,
+          COUNT(*) as total_count
+        FROM ${tableName} 
+        WHERE ${column.column_name} IS NOT NULL
+      `;
+      
       try {
-        const statsQuery = `
-          SELECT 
-            AVG(${column.column_name}) as mean,
-            MIN(${column.column_name}) as min_val,
-            MAX(${column.column_name}) as max_val,
-            STDDEV(${column.column_name}) as stddev,
-            COUNT(*) as total_count
-          FROM ${tableName} 
-          WHERE ${column.column_name} IS NOT NULL
-        `;
-        
         const stats = await this.executeQuery(statsQuery);
         const { mean, min_val, max_val, stddev, total_count } = stats[0] || {};
 
         if (stddev && stddev > 0) {
-          // Check for values beyond 3 standard deviations
-          const outlierQuery = `
-            SELECT COUNT(*) as outlier_count
-            FROM ${tableName}
-            WHERE ${column.column_name} IS NOT NULL 
-              AND (${column.column_name} > ${mean + 3 * stddev} OR ${column.column_name} < ${mean - 3 * stddev})
-          `;
+          let outlierCount = 0;
+          let outlierQuery = '';
+          let method = '';
+          
+          // Use IQR method for small datasets (< 30 rows), 3-sigma for larger ones
+          if (Number(total_count) < 30) {
+            // Use IQR method: Q1 - 1.5*IQR and Q3 + 1.5*IQR
+            const iqrQuery = `
+              SELECT 
+                percentile_cont(0.25) WITHIN GROUP (ORDER BY ${column.column_name}) as q1,
+                percentile_cont(0.75) WITHIN GROUP (ORDER BY ${column.column_name}) as q3
+              FROM ${tableName}
+              WHERE ${column.column_name} IS NOT NULL
+            `;
+            const iqrResult = await this.executeQuery(iqrQuery);
+            const q1 = Number(iqrResult[0]?.q1 || 0);
+            const q3 = Number(iqrResult[0]?.q3 || 0);
+            const iqr = q3 - q1;
+            const lowerBound = q1 - 1.5 * iqr;
+            const upperBound = q3 + 1.5 * iqr;
+            
+            outlierQuery = `
+              SELECT COUNT(*) as outlier_count
+              FROM ${tableName}
+              WHERE ${column.column_name} IS NOT NULL 
+                AND (${column.column_name} < ${lowerBound} OR ${column.column_name} > ${upperBound})
+            `;
+            method = `IQR (Q1=${Math.round(q1 * 100) / 100}, Q3=${Math.round(q3 * 100) / 100})`;
+          } else {
+            // Use 3-sigma method for larger datasets
+            outlierQuery = `
+              SELECT COUNT(*) as outlier_count
+              FROM ${tableName}
+              WHERE ${column.column_name} IS NOT NULL 
+                AND (${column.column_name} > ${mean + 3 * stddev} OR ${column.column_name} < ${mean - 3 * stddev})
+            `;
+            method = `3σ (mean: ${Math.round(mean * 100) / 100}, σ: ${Math.round(stddev * 100) / 100})`;
+          }
           
           const outlierResult = await this.executeQuery(outlierQuery);
-          const outlierCount = outlierResult[0]?.outlier_count || 0;
-          const outlierPercentage = (outlierCount / total_count) * 100;
+          outlierCount = Number(outlierResult[0]?.outlier_count || 0);
+          const outlierPercentage = (outlierCount / Number(total_count)) * 100;
 
           if (outlierCount > 0) {
             let severity = 'low';
             if (outlierPercentage > 5) severity = 'high';
             else if (outlierPercentage > 1) severity = 'medium';
 
-            // Get examples of outliers
-            const exampleQuery = `
-              SELECT ${column.column_name}
-              FROM ${tableName}
-              WHERE ${column.column_name} IS NOT NULL 
-                AND (${column.column_name} > ${mean + 3 * stddev} OR ${column.column_name} < ${mean - 3 * stddev})
-              ORDER BY ABS(${column.column_name} - ${mean}) DESC
-              LIMIT 5
-            `;
+            // Get examples of outliers - reuse the same query logic
+            const exampleQuery = outlierQuery.replace('COUNT(*) as outlier_count', `${column.column_name}`).replace('SELECT', 'SELECT') + ' ORDER BY ABS(' + column.column_name + ' - ' + mean + ') DESC LIMIT 5';
             
             const examples = await this.executeQuery(exampleQuery);
             const exampleText = examples.map(e => `${e[column.column_name]}`).join(', ');
@@ -688,14 +723,14 @@ class QuackMCPServer {
               impact: 'Potential data quality issues, skewed analysis',
               affected_records: outlierCount,
               percentage: Math.round(outlierPercentage * 100) / 100,
-              description: `${outlierCount} values beyond 3σ (mean: ${Math.round(mean * 100) / 100}, σ: ${Math.round(stddev * 100) / 100})`,
+              description: `${outlierCount} values identified using ${method}`,
               examples: `Range: ${min_val} to ${max_val}\nOutlier examples: ${exampleText}`,
               recommendation: 'Investigate extreme values, consider data validation rules'
             });
           }
         }
-      } catch (e) {
-        // Skip columns that can't be analyzed
+      } catch (error) {
+        console.error(`Failed to analyze duplicates for column ${column}:`, error);
       }
     }
 
@@ -715,19 +750,19 @@ class QuackMCPServer {
       : stringColumns.slice(0, 3); // Limit to prevent excessive queries
 
     for (const column of columnsToCheck) {
+      // Check for unusual length patterns
+      const lengthQuery = `
+        SELECT 
+          LENGTH(${column.column_name}) as str_length,
+          COUNT(*) as count
+        FROM ${tableName}
+        WHERE ${column.column_name} IS NOT NULL
+        GROUP BY LENGTH(${column.column_name})
+        ORDER BY count DESC
+        LIMIT 20
+      `;
+      
       try {
-        // Check for unusual length patterns
-        const lengthQuery = `
-          SELECT 
-            LENGTH(${column.column_name}) as str_length,
-            COUNT(*) as count
-          FROM ${tableName}
-          WHERE ${column.column_name} IS NOT NULL
-          GROUP BY LENGTH(${column.column_name})
-          ORDER BY count DESC
-          LIMIT 20
-        `;
-        
         const lengthResults = await this.executeQuery(lengthQuery);
         
         // Look for extremely short or long values
@@ -746,8 +781,8 @@ class QuackMCPServer {
             recommendation: 'Review data input validation and field constraints'
           });
         }
-      } catch (e) {
-        // Skip columns that can't be analyzed
+      } catch (error) {
+        console.error(`Failed to analyze length patterns for column ${column.column_name}:`, error);
       }
     }
 
@@ -784,7 +819,7 @@ class QuackMCPServer {
           this.executeQuery(zeroQuery)
         ]);
         
-        const negativeCount = negativeResult[0]?.negative_count || 0;
+        const _negativeCount = negativeResult[0]?.negative_count || 0;
         const zeroCount = zeroResult[0]?.zero_count || 0;
         
         if (zeroCount > 50) {
@@ -833,8 +868,8 @@ class QuackMCPServer {
         }
       }
 
-    } catch (e) {
-      // Skip business logic checks that fail
+    } catch (error) {
+      console.error('Failed to perform business logic anomaly checks:', error);
     }
 
     return anomalies;
