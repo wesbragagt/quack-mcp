@@ -16,10 +16,14 @@ The best CSV analyst that pulls everything into DuckDB in order to provide LLM a
 
 ### Local Installation
 
+**Prerequisites:**
+- Node.js 24+ (includes native TypeScript support)
+
 ```bash
 npm install
-npm run build
 ```
+
+**Note:** This project leverages Node.js 24's native TypeScript support, eliminating the need for separate compilation steps.
 
 ### Docker Installation
 
@@ -102,7 +106,7 @@ Perform basic statistical analysis on CSV data.
 
 **Parameters:**
 - `table_name` (required): Name of the table to analyze
-- `columns` (optional): Specific columns to analyze
+- `columns` (optional): Array of specific column names to analyze (if not provided, analyzes row counts and general statistics)
 
 ### Multi-File CSV Tools
 
@@ -131,7 +135,7 @@ Discover CSV files matching a glob pattern without loading them.
 
 **Returns:** List of matching files with metadata (size, modification date, existence status)
 
-**Note:** The existing `load_csv` tool now also supports glob patterns for backward compatibility.
+**Note:** The existing `load_csv` tool now also automatically detects and handles glob patterns when the file path contains `*`, `?`, or `[` characters for backward compatibility.
 
 ### Specialized Analysis Tools
 
@@ -151,10 +155,10 @@ Analyze credit card or bank transaction data to identify expense optimization op
 
 **Features:**
 - 📊 Monthly spending analysis with trends and largest purchases
-- 🔄 Subscription detection - automatically finds recurring charges
+- 🔄 Subscription detection - automatically finds recurring charges (2+ occurrences, <$100)
 - ☕ Small purchase categorization - groups coffee, dining, treats, etc.
-- 🛒 Grocery spending optimization - analyzes shopping patterns
-- 💰 Savings estimates - calculates realistic monthly savings potential
+- 🛒 Grocery spending optimization - analyzes shopping patterns for major stores
+- 💰 Savings estimates - calculates realistic monthly savings potential based on spending patterns
 - 📋 Action prioritization - orders recommendations by impact vs. effort
 
 #### `detect_anomalies`
@@ -162,9 +166,57 @@ Detect anomalies and irregularities in dataset using statistical analysis and bu
 
 **Parameters:**
 - `table_name` (required): Name of the table to analyze for anomalies
-- `anomaly_types` (optional): Types of anomalies to detect: statistical, duplicates, nulls, outliers, patterns, business_logic
+- `anomaly_types` (optional): Types of anomalies to detect: statistical, duplicates, nulls, outliers, patterns, business_logic (default: ['statistical', 'duplicates', 'nulls', 'outliers', 'patterns'])
 - `focus_columns` (optional): Specific columns to focus anomaly detection on
 - `severity_threshold` (optional, default: "medium"): Minimum severity level to report (low, medium, high, critical)
+
+## Common Use Cases
+
+### 💳 Family Credit Card Analysis
+*"I use Quack MCP to analyze my family's credit card expenses with summaries, anomalies and detailed breakdowns."*
+
+**Real-world example:**
+- Load multiple credit card CSV exports from different family members
+- Generate monthly spending summaries by person and category
+- Detect unusual spending patterns or potential fraud
+- Identify subscription services we forgot about
+- Find opportunities to reduce dining out or entertainment costs
+- Track progress on budget goals month-over-month
+
+```
+Load all credit card files: ["dad_card.csv", "mom_card.csv", "family_card.csv"]
+Run expense optimization analysis to find savings opportunities
+Detect anomalies to catch any unusual transactions
+Show me monthly trends and biggest expense categories by family member
+```
+
+### 📊 Business Sales Analytics
+**Scenario:** E-commerce business analyzing quarterly performance
+- Load sales data from multiple sources (website, retail, wholesale)
+- Compare performance across different quarters and regions
+- Identify top-performing products and seasonal trends
+- Analyze customer behavior and lifetime value
+
+### 🏠 Real Estate Investment Analysis  
+**Scenario:** Property investor tracking rental income and expenses
+- Combine rental income, maintenance costs, and property taxes
+- Calculate ROI and cash flow for each property
+- Identify properties needing attention or generating losses
+- Track market trends and appreciation
+
+### 📈 Stock Portfolio Performance
+**Scenario:** Personal investment tracking and analysis
+- Load transaction history from multiple brokerage accounts
+- Calculate gains/losses, dividend income, and portfolio allocation
+- Identify underperforming investments
+- Track sector diversification and rebalancing needs
+
+### 🛒 Retail Inventory Management
+**Scenario:** Small business optimizing inventory and purchasing
+- Analyze sales velocity and seasonal patterns
+- Identify slow-moving inventory
+- Optimize reorder points and quantities
+- Track supplier performance and costs
 
 ## Example Workflows
 
@@ -174,10 +226,20 @@ Detect anomalies and irregularities in dataset using statistical analysis and bu
 3. Query your data: `query_csv` with SQL queries
 4. Analyze patterns: `analyze_csv` for statistical insights
 
-### Expense Optimization Analysis
-1. Load transaction data: `load_csv` with your credit card/bank data
-2. Run optimization analysis: `optimize_expenses` with the table name
-3. Review savings opportunities and implement recommendations
+### Family Expense Analysis Workflow
+1. **Gather data**: Export CSV files from all credit cards/bank accounts
+2. **Load multiple files**: `load_multiple_csvs` with family member files
+3. **Get overview**: `optimize_expenses` for spending patterns and savings opportunities
+4. **Find issues**: `detect_anomalies` to catch unusual transactions or potential fraud
+5. **Deep dive**: Use custom SQL queries to analyze specific categories or time periods
+6. **Track progress**: Compare month-over-month trends and budget performance
+
+### Business Intelligence Workflow
+1. **Load datasets**: Use glob patterns to load all relevant CSV files
+2. **Data quality check**: `detect_anomalies` to identify data issues
+3. **Exploratory analysis**: `analyze_csv` for statistical overview
+4. **Custom analysis**: Complex SQL queries for business-specific metrics
+5. **Generate reports**: Create formatted summaries and actionable insights
 
 ### Data Quality Assessment
 1. Load your dataset: `load_csv` with your data file
@@ -358,7 +420,7 @@ Load transaction data from multiple sources:
 
 #### `load_csv`
 - **Usage**: "Load the CSV at /path/to/file.csv"
-- **Features**: Automatic delimiter detection, schema analysis, sample preview
+- **Features**: Automatic delimiter detection, schema analysis, sample preview, glob pattern support
 
 #### `query_csv`
 - **Usage**: "Query the data to find all records where column > value"
@@ -409,7 +471,7 @@ Multi-CSV tools support glob patterns for flexible file matching:
 - `sales_2024_*.csv` - All sales files for 2024
 - `**/monthly_[0-9][0-9].csv` - Monthly files with 2-digit numbers, anywhere in directory tree
 
-**Note:** The `?` wildcard is not supported for S3/remote file reads due to URL encoding issues.
+**Note:** All patterns work with local files. DuckDB handles the glob expansion internally.
 
 ## Tips for Best Results
 
@@ -552,3 +614,44 @@ Or with docker-compose:
   }
 }
 ```
+
+## Contributing
+
+We'd love your help making Quack MCP even better! 🦆 Whether you're fixing a bug, adding a feature, or improving documentation, all contributions are welcome.
+
+### Getting Started
+
+1. **Fork the repository** and clone it locally
+2. **Install dependencies**: `npm install`
+3. **Make your changes** following our coding conventions (see `CLAUDE.md`)
+4. **Test your changes**: `npm test`
+5. **Submit a pull request** with a clear description
+
+### What We're Looking For
+
+- 🐛 **Bug fixes** - Found something broken? We'd love a fix!
+- ✨ **New analysis tools** - Got an idea for a useful CSV analysis feature?
+- 📚 **Documentation improvements** - Clearer examples, better explanations
+- 🧪 **Test coverage** - More tests mean more confidence
+- 🚀 **Performance improvements** - Making things faster is always welcome
+
+### Development Guidelines
+
+- **Follow TypeScript strict mode** - We use strict typing for reliability
+- **Write tests** - New features should include tests
+- **Keep it simple** - Clear, readable code is preferred
+- **Document your changes** - Update README.md if you add new features
+
+### Need Help?
+
+- Check out `CLAUDE.md` for detailed development guidelines
+- Look at existing code for patterns and conventions
+- Open an issue if you're unsure about something
+
+### Code of Conduct
+
+Be kind, be respectful, and remember we're all here to make data analysis easier and more accessible. Let's build something great together! 🎉
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
