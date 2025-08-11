@@ -527,11 +527,9 @@ class QuackMCPServer {
       // Validate table name
       const tableName = table_name.replace(/[^a-zA-Z0-9_]/g, '_');
 
-      let fileSpec: string;
       let discoveredFiles: string[] = [];
 
       if (typeof pattern_or_files === 'string') {
-        fileSpec = pattern_or_files;
         // Discover files if it's a glob pattern
         if (pattern_or_files.includes('*') || pattern_or_files.includes('?') || pattern_or_files.includes('[')) {
           const globQuery = `SELECT file FROM glob('${pattern_or_files.replace(/'/g, "''")}')`;
@@ -544,14 +542,13 @@ class QuackMCPServer {
         }
       } else if (Array.isArray(pattern_or_files)) {
         // For arrays, we'll create a list format that DuckDB can handle
-        fileSpec = JSON.stringify(pattern_or_files);
         discoveredFiles = pattern_or_files;
         
         // Check if all files exist
         for (const filePath of pattern_or_files) {
           try {
             await fs.access(filePath);
-          } catch (error) {
+          } catch {
             throw new Error(`File not found: ${filePath}`);
           }
         }
@@ -561,15 +558,13 @@ class QuackMCPServer {
 
       // Build the DuckDB query based on input type
       let query: string;
-      const escapedFileSpec = typeof pattern_or_files === 'string' 
-        ? pattern_or_files.replace(/'/g, "''")
-        : pattern_or_files;
 
       if (typeof pattern_or_files === 'string') {
         // Use direct string for glob patterns
+        const escapedPattern = pattern_or_files.replace(/'/g, "''");
         query = `
           CREATE OR REPLACE TABLE "${tableName}" AS 
-          SELECT * FROM read_csv('${escapedFileSpec}',
+          SELECT * FROM read_csv('${escapedPattern}',
             header=${header},
             delim='${delimiter}',
             union_by_name=${union_by_name},
