@@ -1,4 +1,4 @@
-FROM node:24-alpine
+FROM node:24.5.0-alpine
 
 # Install build dependencies for native modules (DuckDB)
 RUN apk add --no-cache \
@@ -26,9 +26,6 @@ COPY --chown=nodejs:nodejs tsconfig.json ./
 
 # Switch to non-root user
 USER nodejs
-
-# Expose the application (stdio transport doesn't need a port)
-EXPOSE 3000
 
 # Start the application
 CMD ["node", "src/index.ts"]
