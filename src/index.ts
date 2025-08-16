@@ -948,9 +948,14 @@ class QuackMCPServer {
             throw new Error(`No Excel files found matching pattern: ${pattern_or_files}`);
           }
         } else {
-          // Single file path - validate it's xlsx
+          // Single file path - validate it's xlsx and exists
           if (!pattern_or_files.toLowerCase().endsWith('.xlsx')) {
             throw new Error('Only .xlsx files are supported. Please convert .xls files to .xlsx format.');
+          }
+          try {
+            await fs.access(pattern_or_files);
+          } catch {
+            throw new Error(`File not found: ${pattern_or_files}`);
           }
           discoveredFiles = [pattern_or_files];
         }
@@ -1098,27 +1103,29 @@ class QuackMCPServer {
       let response = `Found ${files.length} files matching pattern "${pattern}"\n\n`;
       response += `Excel files (.xlsx): ${excelFiles.length}\n`;
       response += `Other files: ${nonExcelFiles.length}\n`;
-      response += `Existing Excel files: ${existingFiles.length}\n`;
-      response += `Total Excel file size: ${(totalSize / 1024 / 1024).toFixed(2)} MB\n\n`;
+      
+      if (excelFiles.length > 0) {
+        response += `Existing Excel files: ${existingFiles.length}\n`;
+        response += `Total Excel file size: ${(totalSize / 1024 / 1024).toFixed(2)} MB\n\n`;
+      }
 
       if (nonExcelFiles.length > 0) {
-        response += `⚠️  Non-Excel files found (will be ignored by Excel tools):\n`;
+        response += `\n⚠️  Non-Excel files found (will be ignored by Excel tools):\n`;
         nonExcelFiles.slice(0, 5).forEach(file => {
           response += `- ${file}\n`;
         });
         if (nonExcelFiles.length > 5) {
           response += `... and ${nonExcelFiles.length - 5} more\n`;
         }
-        response += '\n';
       }
 
       if (excelFiles.length > 0) {
-        response += `📊 Excel File Details:\n`;
+        response += `\n📊 Excel File Details:\n`;
         fileInfo.forEach(info => {
           response += `- ${info.path} (${info.exists ? `${(info.size / 1024).toFixed(1)} KB, modified: ${info.modified}` : 'NOT FOUND'})\n`;
         });
       } else {
-        response += `No Excel (.xlsx) files found matching the pattern.`;
+        response += `\nNo Excel (.xlsx) files found matching the pattern.`;
       }
 
       return {
