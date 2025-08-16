@@ -1,15 +1,17 @@
 # Quack MCP
 
-The best CSV analyst that pulls everything into DuckDB in order to provide LLM agents the ability to explore and analyze the data with accuracy and efficiency.
+The best CSV and Excel analyst that pulls everything into DuckDB in order to provide LLM agents the ability to explore and analyze the data with accuracy and efficiency.
 
 ## Features
 
 - **CSV Loading**: Load CSV files into DuckDB for fast analysis
-- **SQL Querying**: Execute complex SQL queries on your CSV data
+- **Excel Support**: Load and analyze Excel (.xlsx) files with sheet and range selection
+- **SQL Querying**: Execute complex SQL queries on your data
 - **Data Analysis**: Built-in statistical analysis tools
 - **Schema Inspection**: Examine table structures and metadata
 - **Expense Optimization**: Analyze spending patterns and identify savings opportunities
 - **Anomaly Detection**: Detect irregularities and outliers in datasets
+- **Multi-File Processing**: Load and combine multiple CSV or Excel files efficiently
 - **MCP Integration**: Works seamlessly with MCP clients like Claude Code
 
 ## Installation
@@ -143,6 +145,53 @@ Discover CSV files matching a glob pattern without loading them.
 
 **Note:** The existing `load_csv` tool now also automatically detects and handles glob patterns when the file path contains `*`, `?`, or `[` characters for backward compatibility.
 
+### Excel Analysis Tools
+
+#### `load_excel`
+Load an Excel (.xlsx) file into DuckDB for analysis.
+
+**Parameters:**
+- `file_path` (required): Path to the Excel file (.xlsx only)
+- `table_name` (optional): Name for the table (defaults to filename)
+- `sheet` (optional): Name or index of the sheet to load (defaults to first sheet)
+- `range` (optional): Cell range to load (e.g., "A1:C10", loads all data by default)
+- `header` (optional): Whether Excel file has header row (default: true)
+- `all_varchar` (optional): Force all columns to be treated as text (default: false)
+
+**Examples:**
+- Basic: `file_path: "data.xlsx"`
+- Specific sheet: `file_path: "workbook.xlsx", sheet: "Sales"`
+- Range selection: `file_path: "report.xlsx", range: "B2:E50"`
+- All options: `file_path: "complex.xlsx", sheet: "Data", range: "A1:Z100", header: false`
+
+#### `load_multiple_excels`
+Load multiple Excel files using glob patterns or file lists into DuckDB for analysis.
+
+**Parameters:**
+- `pattern_or_files` (required): Glob pattern (e.g., "data/*.xlsx", "reports/**/*.xlsx") or array of specific file paths
+- `table_name` (optional): Name for the combined table (defaults to "multi_excel_data")
+- `union_by_name` (optional): Combine files by column name instead of position (default: false)
+- `include_filename` (optional): Include a filename column to track source file for each row (default: false)
+- `sheet` (optional): Name or index of the sheet to load from all files (defaults to first sheet)
+- `header` (optional): Whether Excel files have header rows (default: true)
+- `all_varchar` (optional): Force all columns to be treated as text (default: false)
+
+**Examples:**
+- Load all Excel files: `"data/*.xlsx"`
+- Load files recursively: `"reports/**/*.xlsx"`
+- Load specific files: `["report1.xlsx", "report2.xlsx"]`
+- With sheet selection: `pattern_or_files: "*.xlsx", sheet: "Summary"`
+
+#### `discover_excel_files`
+Discover Excel files matching a glob pattern without loading them.
+
+**Parameters:**
+- `pattern` (required): Glob pattern to search for Excel files
+
+**Returns:** List of matching Excel files with metadata (size, modification date, existence status), separated from non-Excel files
+
+**Important:** Only .xlsx files are supported. Legacy .xls files must be converted to .xlsx format first.
+
 ### Specialized Analysis Tools
 
 #### `optimize_expenses`
@@ -199,9 +248,26 @@ Show me monthly trends and biggest expense categories by family member
 ### 📊 Business Sales Analytics
 **Scenario:** E-commerce business analyzing quarterly performance
 - Load sales data from multiple sources (website, retail, wholesale)
-- Compare performance across different quarters and regions
+- Compare performance across different quarters and regions  
 - Identify top-performing products and seasonal trends
 - Analyze customer behavior and lifetime value
+
+### 📈 Excel Financial Reports Analysis
+*"I analyze financial reports from Excel files with complex worksheets and multiple data ranges."*
+
+**Real-world example:**
+- Load Excel files from accounting system exports
+- Extract specific worksheet ranges (e.g., "Summary!B5:F50")
+- Combine multiple quarterly Excel reports into unified analysis
+- Process both CSV bank exports and Excel financial statements
+- Generate consolidated financial insights across different data sources
+
+```
+Load Excel financial data: "Q1_2024_financials.xlsx" (sheet: "Summary", range: "A1:G100")
+Load multiple quarterly reports: ["Q1.xlsx", "Q2.xlsx", "Q3.xlsx", "Q4.xlsx"] 
+Combine with CSV bank data for comprehensive financial analysis
+Run expense optimization to identify cost-saving opportunities
+```
 
 ### 🏠 Real Estate Investment Analysis  
 **Scenario:** Property investor tracking rental income and expenses
@@ -251,6 +317,19 @@ Show me monthly trends and biggest expense categories by family member
 1. Load your dataset: `load_csv` with your data file
 2. Run anomaly detection: `detect_anomalies` to identify data issues
 3. Clean data based on findings and re-analyze
+
+### Excel Analysis Workflow
+1. **Discover Excel files**: `discover_excel_files` to find available Excel files
+2. **Load Excel data**: `load_excel` with specific sheet and range if needed
+3. **Examine structure**: Review schema and data types automatically displayed
+4. **Advanced analysis**: Use SQL queries for complex Excel data analysis
+5. **Combine sources**: Mix Excel and CSV data for comprehensive insights
+
+### Multi-Format Data Integration
+1. **Load Excel files**: `load_multiple_excels` for quarterly/annual Excel reports
+2. **Load CSV data**: `load_multiple_csvs` for transaction exports
+3. **Unified analysis**: Query across both Excel and CSV tables with JOINs
+4. **Generate insights**: Create reports combining both data sources
 
 ## Using with Claude Code
 
@@ -422,6 +501,65 @@ Load transaction data from multiple sources:
 - Generate monthly spending report
 ```
 
+#### Excel Analysis
+
+**Local:**
+```
+Load the Excel file at /path/to/financial_report.xlsx and analyze the Summary sheet
+```
+
+```
+Load Excel data from specific range: /path/to/budget.xlsx sheet "Q1" range "B5:G50"
+```
+
+**Docker:**
+```
+Load the Excel file at /app/csv-data/sales_data.xlsx from the "Monthly Sales" sheet
+```
+
+```
+Load multiple Excel quarterly reports: /app/csv-data/reports/*.xlsx with filename tracking
+```
+
+#### Mixed Data Analysis
+
+**Local:**
+```
+I have both Excel and CSV data:
+1. Load Excel file /path/to/budget_2024.xlsx (sheet: "Summary")
+2. Load CSV transaction data /path/to/transactions.csv  
+3. Join the data to compare budget vs actual spending
+4. Generate variance analysis report
+```
+
+**Docker:**
+```
+Load financial data from mixed sources:
+- Excel budget: /app/csv-data/budget.xlsx (sheet: "Annual", range: "A1:F12")
+- CSV transactions: /app/csv-data/transactions_*.csv pattern
+- Combine and analyze budget performance by month
+```
+
+#### Excel-Specific Examples
+
+**Local:**
+```
+I have an Excel workbook with multiple sheets at /path/to/company_data.xlsx:
+1. Load the "Sales" sheet with range A1:Z100
+2. Load the "Expenses" sheet separately  
+3. Create a profit analysis combining both sheets
+4. Identify top revenue sources and biggest cost centers
+```
+
+**Docker:**
+```
+Load Excel files from accounting system:
+- Multiple files: /app/csv-data/monthly_*.xlsx
+- Extract "P&L" sheet from each file
+- Include filename to track months
+- Generate year-over-year comparison
+```
+
 ### Available Tools in Claude Code
 
 #### `load_csv`
@@ -458,24 +596,36 @@ Load transaction data from multiple sources:
 - **Usage**: "What CSV files are available in the reports/ directory?"
 - **Features**: File discovery, metadata, size and modification info
 
+#### `load_excel`
+- **Usage**: "Load the Excel file at /path/to/data.xlsx" or "Load sheet 'Summary' from financial_report.xlsx"
+- **Features**: Sheet selection, range specification, automatic schema detection, .xlsx support only
+
+#### `load_multiple_excels`
+- **Usage**: "Load all Excel files matching reports/*.xlsx pattern" or "Load quarterly Excel files with filename tracking"
+- **Features**: Glob patterns, file lists, sheet selection, schema unification, filename tracking
+
+#### `discover_excel_files`
+- **Usage**: "What Excel files are available in the financial/ directory?"
+- **Features**: Excel file discovery, metadata, differentiation from other file types
+
 ## Glob Pattern Reference
 
-Multi-CSV tools support glob patterns for flexible file matching:
+Multi-CSV and Excel tools support glob patterns for flexible file matching:
 
-| Pattern | Description | Example |
-|---------|-------------|---------|
-| `*` | Matches any characters | `sales_*.csv` matches `sales_q1.csv`, `sales_2024.csv` |
-| `**` | Matches directories recursively | `data/**/*.csv` finds CSVs at any depth in `data/` |
-| `?` | Matches single character | `report_?.csv` matches `report_1.csv`, `report_A.csv` |
-| `[abc]` | Matches any character in brackets | `sales_[123].csv` matches `sales_1.csv`, `sales_2.csv`, `sales_3.csv` |
-| `[a-z]` | Matches character range | `file_[a-c].csv` matches `file_a.csv`, `file_b.csv`, `file_c.csv` |
+| Pattern | Description | CSV Example | Excel Example |
+|---------|-------------|-------------|---------------|
+| `*` | Matches any characters | `sales_*.csv` matches `sales_q1.csv` | `report_*.xlsx` matches `report_q1.xlsx` |
+| `**` | Matches directories recursively | `data/**/*.csv` finds CSVs at any depth | `reports/**/*.xlsx` finds Excel files at any depth |
+| `?` | Matches single character | `report_?.csv` matches `report_1.csv` | `data_?.xlsx` matches `data_1.xlsx` |
+| `[abc]` | Matches any character in brackets | `sales_[123].csv` | `budget_[ABC].xlsx` |
+| `[a-z]` | Matches character range | `file_[a-c].csv` | `sheet_[a-c].xlsx` |
 
 **Example Patterns:**
-- `*.csv` - All CSV files in current directory
-- `data/*.csv` - All CSV files in data directory
-- `reports/**/*.csv` - All CSV files in reports directory and subdirectories
-- `sales_2024_*.csv` - All sales files for 2024
-- `**/monthly_[0-9][0-9].csv` - Monthly files with 2-digit numbers, anywhere in directory tree
+- `*.csv` / `*.xlsx` - All CSV/Excel files in current directory
+- `data/*.csv` / `data/*.xlsx` - All files in data directory
+- `reports/**/*.csv` / `reports/**/*.xlsx` - All files in reports directory and subdirectories
+- `sales_2024_*.csv` / `financial_2024_*.xlsx` - All files for 2024
+- `**/monthly_[0-9][0-9].csv` / `**/quarterly_[1-4].xlsx` - Numbered files anywhere in directory tree
 
 **Note:** All patterns work with local files. DuckDB handles the glob expansion internally.
 
@@ -502,18 +652,27 @@ Ask for formatted output:
 - "Create a summary table of sales by region"
 - "Show the top 10 results formatted nicely"
 
-### 5. Multi-CSV Best Practices
-When working with multiple CSV files:
+### 5. Multi-File Best Practices
+When working with multiple CSV or Excel files:
 - **Use `union_by_name=true`** when files have different column orders or missing columns
 - **Enable `filename=true`** to track which file each row came from
-- **Use `discover_csv_files`** first to see what files match your pattern
+- **Use `discover_csv_files` or `discover_excel_files`** first to see what files match your pattern
 - **Start with a small pattern** to test schema compatibility before loading all files
 - **Use descriptive table names** when loading multiple datasets
 
+### 6. Excel-Specific Best Practices
+When working with Excel files:
+- **Specify sheet names** when workbooks have multiple sheets: `sheet: "Summary"`
+- **Use range selection** for large workbooks: `range: "A1:G100"`
+- **Convert .xls to .xlsx** - only .xlsx format is supported
+- **Test with single files** before loading multiple Excel files
+- **Use `all_varchar=true`** if Excel has mixed data types causing issues
+
 **Examples:**
-- ✅ "Load all sales files with union_by_name and filename tracking"
-- ✅ "First discover what CSV files are in /data/reports/ then load them"
-- ✅ "Load quarterly files and analyze by source file"
+- ✅ "Load quarterly Excel reports with specific sheet: reports/*.xlsx, sheet: 'Q1 Summary'"
+- ✅ "Load Excel range B5:F50 from the 'Data' sheet in financial_report.xlsx"
+- ✅ "First discover what Excel files are available, then load with filename tracking"
+- ✅ "Load multiple Excel files and combine with CSV transaction data"
 
 ## Troubleshooting
 

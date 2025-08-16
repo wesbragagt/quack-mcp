@@ -241,6 +241,108 @@ class QuackMCPServer {
             required: ['table_name'],
           },
         },
+        {
+          name: 'load_excel',
+          description: 'Load an Excel (.xlsx) file into DuckDB for analysis',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              file_path: {
+                type: 'string',
+                description: 'Path to the Excel file to load',
+              },
+              table_name: {
+                type: 'string',
+                description: 'Name for the table (optional, defaults to filename)',
+              },
+              sheet: {
+                type: 'string',
+                description: 'Name or index of the sheet to load (optional, defaults to first sheet)',
+              },
+              range: {
+                type: 'string',
+                description: 'Cell range to load (e.g., "A1:C10") (optional, loads all data by default)',
+              },
+              header: {
+                type: 'boolean',
+                description: 'Whether Excel file has header row (default: true)',
+                default: true,
+              },
+              all_varchar: {
+                type: 'boolean',
+                description: 'Force all columns to be treated as text (default: false)',
+                default: false,
+              },
+            },
+            required: ['file_path'],
+          },
+        },
+        {
+          name: 'load_multiple_excels',
+          description: 'Load multiple Excel files using glob patterns or file lists into DuckDB for analysis',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              pattern_or_files: {
+                oneOf: [
+                  {
+                    type: 'string',
+                    description: 'Glob pattern to match Excel files (e.g., "*.xlsx", "data/**/*.xlsx")',
+                  },
+                  {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Array of specific Excel file paths to load',
+                  },
+                ],
+                description: 'Glob pattern or array of file paths to load',
+              },
+              table_name: {
+                type: 'string',
+                description: 'Name for the combined table (optional, defaults to "multi_excel_data")',
+              },
+              union_by_name: {
+                type: 'boolean',
+                description: 'Combine files by column name instead of position (default: false)',
+                default: false,
+              },
+              include_filename: {
+                type: 'boolean',
+                description: 'Include a filename column to track source file for each row (default: false)',
+                default: false,
+              },
+              sheet: {
+                type: 'string',
+                description: 'Name or index of the sheet to load from all files (optional, defaults to first sheet)',
+              },
+              header: {
+                type: 'boolean',
+                description: 'Whether Excel files have header rows (default: true)',
+                default: true,
+              },
+              all_varchar: {
+                type: 'boolean',
+                description: 'Force all columns to be treated as text (default: false)',
+                default: false,
+              },
+            },
+            required: ['pattern_or_files'],
+          },
+        },
+        {
+          name: 'discover_excel_files',
+          description: 'Discover Excel files matching a glob pattern',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              pattern: {
+                type: 'string',
+                description: 'Glob pattern to search for Excel files (e.g., "*.xlsx", "data/**/*.xlsx")',
+              },
+            },
+            required: ['pattern'],
+          },
+        },
       ],
     }));
 
@@ -264,6 +366,12 @@ class QuackMCPServer {
           return await this.optimizeExpenses(request.params.arguments);
         case 'detect_anomalies':
           return await this.detectAnomalies(request.params.arguments);
+        case 'load_excel':
+          return await this.loadExcel(request.params.arguments);
+        case 'load_multiple_excels':
+          return await this.loadMultipleExcels(request.params.arguments);
+        case 'discover_excel_files':
+          return await this.discoverExcelFiles(request.params.arguments);
         default:
           throw new McpError(
             ErrorCode.MethodNotFound,
@@ -736,6 +844,295 @@ class QuackMCPServer {
       throw new McpError(
         ErrorCode.InternalError,
         `Anomaly detection failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  async loadExcel(args: any) {
+    try {
+      const { file_path, table_name, sheet, range, header = true, all_varchar = false } = args;
+
+      // Validate file extension
+      if (!file_path.toLowerCase().endsWith('.xlsx')) {
+        throw new Error('Only .xlsx files are supported. Please convert .xls files to .xlsx format.');
+      }
+
+      // Check if file exists
+      await fs.access(file_path);
+
+      // Ensure Excel extension is loaded
+      await this.#ensureExcelExtension();
+
+      const tableName = table_name || path.basename(file_path, path.extname(file_path)).replace(/[^a-zA-Z0-9_]/g, '_');
+
+      // Build query parameters
+      const escapedPath = file_path.replace(/'/g, "''");
+      const queryParams: string[] = [`'${escapedPath}'`];
+      
+      // Add optional parameters
+      const options: string[] = [];
+      if (sheet) options.push(`sheet='${sheet.replace(/'/g, "''")}'`);
+      if (range) options.push(`range='${range.replace(/'/g, "''")}'`);
+      options.push(`header=${header}`);
+      if (all_varchar) options.push(`all_varchar=${all_varchar}`);
+
+      const optionsStr = options.length > 0 ? `, ${options.join(', ')}` : '';
+      
+      const query = `
+        CREATE OR REPLACE TABLE "${tableName}" AS 
+        SELECT * FROM read_xlsx(${queryParams[0]}${optionsStr})
+      `;
+
+      console.error('Executing Excel query:', query);
+      await this.executeQuery(query);
+      
+      // Check if the table has any rows
+      const rowCountQuery = `SELECT COUNT(*) as row_count FROM "${tableName}"`;
+      const rowCountResult = await this.executeQuery(rowCountQuery);
+      const rowCount = Number(rowCountResult[0]?.row_count || 0);
+      
+      if (rowCount === 0) {
+        await this.executeQuery(`DROP TABLE IF EXISTS "${tableName}"`);
+        throw new Error('Excel file is empty or contains no valid data in the specified sheet/range');
+      }
+      
+      this.loadedTables.set(tableName, file_path);
+
+      // Automatically inspect the schema and data
+      const schemaInfo = await this.inspectTableSchema(tableName);
+      
+      const sheetInfo = sheet ? ` (sheet: ${sheet})` : '';
+      const rangeInfo = range ? ` (range: ${range})` : '';
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Successfully loaded Excel file "${file_path}"${sheetInfo}${rangeInfo} as table "${tableName}"\n\n${schemaInfo}`,
+          },
+        ],
+      };
+    } catch (error) {
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Failed to load Excel: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  async loadMultipleExcels(args: any) {
+    try {
+      const {
+        pattern_or_files,
+        table_name = 'multi_excel_data',
+        union_by_name = false,
+        include_filename = false,
+        sheet,
+        header = true,
+        all_varchar = false
+      } = args;
+
+      // Validate table name
+      const tableName = table_name.replace(/[^a-zA-Z0-9_]/g, '_');
+
+      let discoveredFiles: string[] = [];
+
+      if (typeof pattern_or_files === 'string') {
+        // Discover files if it's a glob pattern
+        if (pattern_or_files.includes('*') || pattern_or_files.includes('?') || pattern_or_files.includes('[')) {
+          const globQuery = `SELECT file FROM glob('${pattern_or_files.replace(/'/g, "''")}')`;
+          const globResult = await this.executeQuery(globQuery);
+          discoveredFiles = globResult.map((row: any) => row.file);
+          
+          if (discoveredFiles.length === 0) {
+            throw new Error(`No Excel files found matching pattern: ${pattern_or_files}`);
+          }
+        } else {
+          // Single file path - validate it's xlsx
+          if (!pattern_or_files.toLowerCase().endsWith('.xlsx')) {
+            throw new Error('Only .xlsx files are supported. Please convert .xls files to .xlsx format.');
+          }
+          discoveredFiles = [pattern_or_files];
+        }
+      } else if (Array.isArray(pattern_or_files)) {
+        discoveredFiles = pattern_or_files;
+        
+        // Check if all files exist and are xlsx files
+        for (const filePath of pattern_or_files) {
+          if (!filePath.toLowerCase().endsWith('.xlsx')) {
+            throw new Error(`Only .xlsx files are supported. Found non-xlsx file: ${filePath}`);
+          }
+          try {
+            await fs.access(filePath);
+          } catch {
+            throw new Error(`File not found: ${filePath}`);
+          }
+        }
+      } else {
+        throw new Error('pattern_or_files must be a string (glob pattern) or array of file paths');
+      }
+
+      // Validate that we found xlsx files
+      const nonXlsxFiles = discoveredFiles.filter(file => !file.toLowerCase().endsWith('.xlsx'));
+      if (nonXlsxFiles.length > 0) {
+        throw new Error(`Found non-xlsx files: ${nonXlsxFiles.join(', ')}. Only .xlsx files are supported.`);
+      }
+
+      // Ensure Excel extension is loaded
+      await this.#ensureExcelExtension();
+
+      // Build the DuckDB query based on input type
+      let query: string;
+
+      if (typeof pattern_or_files === 'string' && pattern_or_files.includes('*')) {
+        // Use direct string for glob patterns
+        const escapedPattern = pattern_or_files.replace(/'/g, "''");
+        const options: string[] = [];
+        if (sheet) options.push(`sheet='${sheet.replace(/'/g, "''")}'`);
+        options.push(`header=${header}`);
+        options.push(`union_by_name=${union_by_name}`);
+        options.push(`filename=${include_filename}`);
+        if (all_varchar) options.push(`all_varchar=${all_varchar}`);
+
+        const optionsStr = options.join(', ');
+        query = `
+          CREATE OR REPLACE TABLE "${tableName}" AS 
+          SELECT * FROM read_xlsx('${escapedPattern}', ${optionsStr})
+        `;
+      } else {
+        // Use array format for file lists
+        const fileList = discoveredFiles.map(f => `'${f.replace(/'/g, "''")}'`).join(', ');
+        const options: string[] = [];
+        if (sheet) options.push(`sheet='${sheet.replace(/'/g, "''")}'`);
+        options.push(`header=${header}`);
+        options.push(`union_by_name=${union_by_name}`);
+        options.push(`filename=${include_filename}`);
+        if (all_varchar) options.push(`all_varchar=${all_varchar}`);
+
+        const optionsStr = options.join(', ');
+        query = `
+          CREATE OR REPLACE TABLE "${tableName}" AS 
+          SELECT * FROM read_xlsx([${fileList}], ${optionsStr})
+        `;
+      }
+
+      console.error('Executing multi-Excel query:', query);
+      await this.executeQuery(query);
+
+      // Check if the table has any rows
+      const rowCountQuery = `SELECT COUNT(*) as row_count FROM "${tableName}"`;
+      const rowCountResult = await this.executeQuery(rowCountQuery);
+      const rowCount = Number(rowCountResult[0]?.row_count || 0);
+
+      if (rowCount === 0) {
+        await this.executeQuery(`DROP TABLE IF EXISTS "${tableName}"`);
+        throw new Error('No data was loaded from the Excel files');
+      }
+
+      // Store the table reference
+      this.loadedTables.set(tableName, typeof pattern_or_files === 'string' ? pattern_or_files : pattern_or_files.join(', '));
+
+      // Get schema and sample information
+      const schemaInfo = await this.inspectTableSchema(tableName);
+      
+      const fileCountText = discoveredFiles.length > 0 
+        ? `${discoveredFiles.length} files` 
+        : 'multiple files';
+
+      const sheetInfo = sheet ? ` (sheet: ${sheet})` : '';
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Successfully loaded ${fileCountText} Excel files${sheetInfo} as table "${tableName}"\n\nFiles processed: ${discoveredFiles.length > 0 ? discoveredFiles.slice(0, 10).join(', ') + (discoveredFiles.length > 10 ? '...' : '') : 'matched by pattern'}\n\n${schemaInfo}`,
+          },
+        ],
+      };
+    } catch (error) {
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Multi-Excel loading failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  async discoverExcelFiles(args: any) {
+    try {
+      const { pattern } = args;
+
+      // Use DuckDB's glob function to find matching files
+      const query = `SELECT file FROM glob('${pattern.replace(/'/g, "''")}') ORDER BY file`;
+      const result = await this.executeQuery(query);
+      
+      const files = result.map((row: any) => row.file);
+      
+      // Filter to only Excel files and get additional info
+      const excelFiles = files.filter(file => file.toLowerCase().endsWith('.xlsx'));
+      const nonExcelFiles = files.filter(file => !file.toLowerCase().endsWith('.xlsx'));
+      
+      // Get additional file info for Excel files
+      const fileInfo = await Promise.all(excelFiles.map(async (filePath: string) => {
+        try {
+          const stats = await fs.stat(filePath);
+          return {
+            path: filePath,
+            size: stats.size,
+            modified: stats.mtime.toISOString(),
+            exists: true
+          };
+        } catch (error) {
+          return {
+            path: filePath,
+            size: 0,
+            modified: null,
+            exists: false,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          };
+        }
+      }));
+
+      const totalSize = fileInfo.reduce((sum, info) => sum + (info.exists ? info.size : 0), 0);
+      const existingFiles = fileInfo.filter(info => info.exists);
+
+      let response = `Found ${files.length} files matching pattern "${pattern}"\n\n`;
+      response += `Excel files (.xlsx): ${excelFiles.length}\n`;
+      response += `Other files: ${nonExcelFiles.length}\n`;
+      response += `Existing Excel files: ${existingFiles.length}\n`;
+      response += `Total Excel file size: ${(totalSize / 1024 / 1024).toFixed(2)} MB\n\n`;
+
+      if (nonExcelFiles.length > 0) {
+        response += `⚠️  Non-Excel files found (will be ignored by Excel tools):\n`;
+        nonExcelFiles.slice(0, 5).forEach(file => {
+          response += `- ${file}\n`;
+        });
+        if (nonExcelFiles.length > 5) {
+          response += `... and ${nonExcelFiles.length - 5} more\n`;
+        }
+        response += '\n';
+      }
+
+      if (excelFiles.length > 0) {
+        response += `📊 Excel File Details:\n`;
+        fileInfo.forEach(info => {
+          response += `- ${info.path} (${info.exists ? `${(info.size / 1024).toFixed(1)} KB, modified: ${info.modified}` : 'NOT FOUND'})\n`;
+        });
+      } else {
+        response += `No Excel (.xlsx) files found matching the pattern.`;
+      }
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: response,
+          },
+        ],
+      };
+    } catch (error) {
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Excel file discovery failed: ${error instanceof Error ? error.message : String(error)}`
       );
     }
   }
@@ -1249,6 +1646,15 @@ class QuackMCPServer {
     });
     
     return result;
+  }
+
+  async #ensureExcelExtension(): Promise<void> {
+    try {
+      await this.executeQuery('INSTALL excel');
+      await this.executeQuery('LOAD excel');
+    } catch (error) {
+      console.error('Excel extension already loaded or failed to load:', error);
+    }
   }
 
   private executeQuery(query: string): Promise<any[]> {
