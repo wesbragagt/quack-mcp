@@ -19,19 +19,26 @@ The best CSV and Excel analyst that pulls everything into DuckDB in order to pro
 ### Local Installation
 
 **Prerequisites:**
-- **Node.js 24+** (required)
+- **Python 3.12+** (required)
+- **uv** package manager (recommended)
 
 ```bash
-npm install
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install dependencies
+uv sync
+
+# Run the server
+uv run python -m quack_mcp.server
 ```
 
-**Why Node.js 24 is required:**
-- **Native TypeScript support** - Run `.ts` files directly without compilation
-- **Modern ES modules** - Full support for `import`/`export` syntax used throughout the codebase
-- **Built-in test runner** - Uses Node.js native test runner (`node --test`)
-- **Security updates** - Latest security patches and improvements
-
-This eliminates the need for build tools like `tsc`, `ts-node`, or bundlers, making development faster and deployments simpler.
+**Why Python 3.12 and uv:**
+- **Modern Python** - Latest language features, performance improvements, and security updates
+- **Fast dependency resolution** - uv provides blazing-fast package installation and virtual environment management
+- **Type safety** - Full support for modern Python typing with Pydantic models and pyright
+- **Robust testing** - pytest with comprehensive fixtures and async test support
+- **Code quality** - ruff for fast linting and formatting
 
 ### Docker Installation
 
@@ -63,7 +70,7 @@ docker-compose up quack-mcp-dev
 The server runs via stdin/stdout transport for MCP protocol:
 
 ```bash
-node src/index.ts
+uv run python -m quack_mcp.server
 ```
 
 ### Docker Usage
@@ -335,7 +342,7 @@ Run expense optimization to identify cost-saving opportunities
 
 ### Prerequisites
 - Claude Code installed and configured
-- Either Node.js installed (for local) OR Docker installed (for containerized)
+- Either Python 3.12+ with uv (for local) OR Docker installed (for containerized)
 
 ### Local Configuration
 
@@ -345,8 +352,9 @@ For local installation, add the following to your Claude Code MCP configuration 
 {
   "mcpServers": {
     "quack-csv": {
-      "command": "node",
-      "args": ["/absolute/path/to/quack-mcp/src/index.ts"],
+      "command": "uv",
+      "args": ["run", "python", "-m", "quack_mcp.server"],
+      "cwd": "/absolute/path/to/quack-mcp",
       "env": {}
     }
   }
@@ -738,8 +746,9 @@ For other MCP clients, add to your configuration:
 {
   "mcpServers": {
     "quack-mcp": {
-      "command": "node",
-      "args": ["/path/to/quack-mcp/src/index.ts"]
+      "command": "uv",
+      "args": ["run", "python", "-m", "quack_mcp.server"],
+      "cwd": "/path/to/quack-mcp"
     }
   }
 }
@@ -787,10 +796,11 @@ We'd love your help making Quack MCP even better! 🦆 Whether you're fixing a b
 ### Getting Started
 
 1. **Fork the repository** and clone it locally
-2. **Install dependencies**: `npm install`
+2. **Install dependencies**: `uv sync`
 3. **Make your changes** following our coding conventions (see `CLAUDE.md`)
-4. **Test your changes**: `npm test`
-5. **Submit a pull request** with a clear description
+4. **Test your changes**: `uv run pytest`
+5. **Run code quality checks**: `uv run ruff check && uv run pyright`
+6. **Submit a pull request** with a clear description
 
 ### What We're Looking For
 
@@ -802,8 +812,10 @@ We'd love your help making Quack MCP even better! 🦆 Whether you're fixing a b
 
 ### Development Guidelines
 
-- **Follow TypeScript strict mode** - We use strict typing for reliability
-- **Write tests** - New features should include tests
+- **Follow Python type hints** - We use strict typing with pyright for reliability
+- **Use Pydantic models** - All tool inputs should use Pydantic for validation
+- **Write tests** - New features should include pytest tests with proper fixtures
+- **Run quality checks** - Use `uv run ruff check` for linting and `uv run pyright` for type checking
 - **Keep it simple** - Clear, readable code is preferred
 - **Document your changes** - Update README.md if you add new features
 

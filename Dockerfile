@@ -1,31 +1,34 @@
-FROM node:24.5.0-alpine
+FROM python:3.12-slim
 
-# Install build dependencies for native modules (DuckDB)
-RUN apk add --no-cache \
-    python3 \
-    make \
-    g++ \
-    libc6-compat
+# Install system dependencies for DuckDB and uv
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.cargo/bin:$PATH"
 
 # Create app directory
 WORKDIR /app
 
 # Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+RUN groupadd --gid 1001 appuser && \
+    useradd --uid 1001 --gid 1001 --create-home appuser
 
-# Copy package files
-COPY package*.json ./
+# Copy project files
+COPY pyproject.toml ./
+COPY README.md ./
 
 # Install dependencies
-RUN npm ci --only=production && npm cache clean --force
+RUN uv sync --frozen
 
 # Copy source code
-COPY --chown=nodejs:nodejs src/ ./src/
-COPY --chown=nodejs:nodejs tsconfig.json ./
+COPY --chown=appuser:appuser src/ ./src/
 
 # Switch to non-root user
-USER nodejs
+USER appuser
 
-# Start the application
-CMD ["node", "src/index.ts"]
+# Activate virtual environment and start the application
+CMD ["uv", "run", "python", "-m", "quack_mcp.server"]
