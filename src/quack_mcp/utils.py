@@ -1,6 +1,7 @@
 """Utility functions for Quack MCP server."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,6 @@ def safe_json_dumps(obj: Any, indent: int | None = 2) -> str:
 
 def sanitize_table_name(name: str) -> str:
     """Sanitize table name for DuckDB."""
-    import re
     return re.sub(r"[^a-zA-Z0-9_]", "_", name)
 
 

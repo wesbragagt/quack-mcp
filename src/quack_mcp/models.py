@@ -29,23 +29,24 @@ class LoadMultipleCSVsArgs(BaseModel):
     """Arguments for load_multiple_csvs tool."""
 
     pattern_or_files: str | list[str] = Field(
-        ...,
-        description="Glob pattern or array of file paths to load"
+        ..., description="Glob pattern or array of file paths to load"
     )
     table_name: str = Field(
         "multi_csv_data",
-        description="Name for the combined table (optional, defaults to 'multi_csv_data')"
+        description="Name for the combined table (optional, defaults to 'multi_csv_data')",
     )
     union_by_name: bool = Field(
         False,
-        description="Combine files by column name instead of position (default: false)"
+        description="Combine files by column name instead of position (default: false)",
     )
     include_filename: bool = Field(
         False,
-        description="Include a filename column to track source file for each row (default: false)"
+        description="Include a filename column to track source file for each row (default: false)",
     )
     delimiter: str = Field(",", description="CSV delimiter (default: ',')")
-    header: bool = Field(True, description="Whether CSV files have header rows (default: true)")
+    header: bool = Field(
+        True, description="Whether CSV files have header rows (default: true)"
+    )
 
 
 class LoadExcelArgs(BaseModel):
@@ -57,13 +58,15 @@ class LoadExcelArgs(BaseModel):
     )
     sheet: str | None = Field(
         None,
-        description="Name or index of the sheet to load (optional, defaults to first sheet)"
+        description="Name or index of the sheet to load (optional, defaults to first sheet)",
     )
     range: str | None = Field(
         None,
-        description="Cell range to load (e.g., 'A1:C10') (optional, loads all data by default)"
+        description="Cell range to load (e.g., 'A1:C10') (optional, loads all data by default)",
     )
-    header: bool = Field(True, description="Whether Excel file has header row (default: true)")
+    header: bool = Field(
+        True, description="Whether Excel file has header row (default: true)"
+    )
     all_varchar: bool = Field(
         False, description="Force all columns to be treated as text (default: false)"
     )
@@ -82,26 +85,27 @@ class LoadMultipleExcelsArgs(BaseModel):
     """Arguments for load_multiple_excels tool."""
 
     pattern_or_files: str | list[str] = Field(
-        ...,
-        description="Glob pattern or array of file paths to load"
+        ..., description="Glob pattern or array of file paths to load"
     )
     table_name: str = Field(
         "multi_excel_data",
-        description="Name for the combined table (optional, defaults to 'multi_excel_data')"
+        description="Name for the combined table (optional, defaults to 'multi_excel_data')",
     )
     union_by_name: bool = Field(
         False,
-        description="Combine files by column name instead of position (default: false)"
+        description="Combine files by column name instead of position (default: false)",
     )
     include_filename: bool = Field(
         False,
-        description="Include a filename column to track source file for each row (default: false)"
+        description="Include a filename column to track source file for each row (default: false)",
     )
     sheet: str | None = Field(
         None,
-        description="Name or index of the sheet to load from all files (optional, defaults to first sheet)"
+        description="Name or index of the sheet to load from all files (optional, defaults to first sheet)",
     )
-    header: bool = Field(True, description="Whether Excel files have header rows (default: true)")
+    header: bool = Field(
+        True, description="Whether Excel files have header rows (default: true)"
+    )
     all_varchar: bool = Field(
         False, description="Force all columns to be treated as text (default: false)"
     )
@@ -154,7 +158,7 @@ class DiscoverCSVFilesArgs(BaseModel):
 
     pattern: str = Field(
         ...,
-        description="Glob pattern to search for CSV files (e.g., '*.csv', 'data/**/*.csv')"
+        description="Glob pattern to search for CSV files (e.g., '*.csv', 'data/**/*.csv')",
     )
 
     @field_validator("pattern")
@@ -170,7 +174,7 @@ class DiscoverExcelFilesArgs(BaseModel):
 
     pattern: str = Field(
         ...,
-        description="Glob pattern to search for Excel files (e.g., '*.xlsx', 'data/**/*.xlsx')"
+        description="Glob pattern to search for Excel files (e.g., '*.xlsx', 'data/**/*.xlsx')",
     )
 
     @field_validator("pattern")
@@ -184,10 +188,18 @@ class DiscoverExcelFilesArgs(BaseModel):
 class OptimizeExpensesArgs(BaseModel):
     """Arguments for optimize_expenses tool."""
 
-    table_name: str = Field(..., description="Name of the table containing transaction data")
-    amount_column: str = Field("Amount", description="Name of the column containing transaction amounts")
-    name_column: str = Field("Name", description="Name of the column containing merchant/transaction names")
-    date_column: str = Field("Date", description="Name of the column containing transaction dates")
+    table_name: str = Field(
+        ..., description="Name of the table containing transaction data"
+    )
+    amount_column: str = Field(
+        "Amount", description="Name of the column containing transaction amounts"
+    )
+    name_column: str = Field(
+        "Name", description="Name of the column containing merchant/transaction names"
+    )
+    date_column: str = Field(
+        "Date", description="Name of the column containing transaction dates"
+    )
 
     @field_validator("table_name", "amount_column", "name_column", "date_column")
     @classmethod
@@ -197,24 +209,28 @@ class OptimizeExpensesArgs(BaseModel):
         return v
 
 
-AnomalyType = Literal["statistical", "duplicates", "nulls", "outliers", "patterns", "business_logic"]
+AnomalyType = Literal[
+    "statistical", "duplicates", "nulls", "outliers", "patterns", "business_logic"
+]
 SeverityLevel = Literal["low", "medium", "high", "critical"]
 
 
 class DetectAnomaliesArgs(BaseModel):
     """Arguments for detect_anomalies tool."""
 
-    table_name: str = Field(..., description="Name of the table to analyze for anomalies")
+    table_name: str = Field(
+        ..., description="Name of the table to analyze for anomalies"
+    )
     severity_threshold: SeverityLevel = Field(
         "medium",
-        description="Minimum severity level to report (low, medium, high, critical)"
+        description="Minimum severity level to report (low, medium, high, critical)",
     )
     focus_columns: list[str] | None = Field(
         None, description="Specific columns to focus anomaly detection on (optional)"
     )
     anomaly_types: list[AnomalyType] = Field(
         ["statistical", "duplicates", "nulls", "outliers", "patterns"],
-        description="Types of anomalies to detect: statistical, duplicates, nulls, outliers, patterns, business_logic"
+        description="Types of anomalies to detect: statistical, duplicates, nulls, outliers, patterns, business_logic",
     )
 
     @field_validator("table_name")

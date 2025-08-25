@@ -29,6 +29,7 @@ from .models import (
 from .tools.analysis import AnalysisTools
 from .tools.data_loading import DataLoadingTools
 from .tools.specialized import SpecializedTools
+from .utils import format_sample_data, get_column_type_icon
 
 
 class QuackMCPServer:
@@ -123,51 +124,56 @@ class QuackMCPServer:
         async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             """Handle tool calls."""
             try:
-                # Route to appropriate tool handler
-                if name == "load_csv":
-                    args = LoadCSVArgs.model_validate(arguments)
-                    return await self.data_tools.load_csv(args)
-                elif name == "load_multiple_csvs":
-                    args = LoadMultipleCSVsArgs.model_validate(arguments)
-                    return await self.data_tools.load_multiple_csvs(args)
-                elif name == "load_excel":
-                    args = LoadExcelArgs.model_validate(arguments)
-                    return await self.data_tools.load_excel(args)
-                elif name == "load_multiple_excels":
-                    args = LoadMultipleExcelsArgs.model_validate(arguments)
-                    return await self.data_tools.load_multiple_excels(args)
-                elif name == "query_csv":
-                    args = QueryCSVArgs.model_validate(arguments)
-                    return await self.analysis_tools.query_csv(args)
-                elif name == "describe_table":
-                    args = DescribeTableArgs.model_validate(arguments)
-                    return await self.analysis_tools.describe_table(args)
-                elif name == "list_tables":
-                    return await self.analysis_tools.list_tables()
-                elif name == "analyze_csv":
-                    args = AnalyzeCSVArgs.model_validate(arguments)
-                    return await self.analysis_tools.analyze_csv(args)
-                elif name == "discover_csv_files":
-                    args = DiscoverCSVFilesArgs.model_validate(arguments)
-                    return await self.data_tools.discover_csv_files(args)
-                elif name == "discover_excel_files":
-                    args = DiscoverExcelFilesArgs.model_validate(arguments)
-                    return await self.data_tools.discover_excel_files(args)
-                elif name == "optimize_expenses":
-                    args = OptimizeExpensesArgs.model_validate(arguments)
-                    return await self.specialized_tools.optimize_expenses(args)
-                elif name == "detect_anomalies":
-                    args = DetectAnomaliesArgs.model_validate(arguments)
-                    return await self.specialized_tools.detect_anomalies(args)
-                else:
-                    raise QuackMCPError(f"Unknown tool: {name}")
-
+                return await self._dispatch_tool(name, arguments)
             except ValidationError as e:
-                raise QuackMCPError(f"Invalid arguments for {name}: {e}")
+                raise QuackMCPError(f"Invalid arguments for {name}: {e}") from e
             except Exception as e:
                 if isinstance(e, QuackMCPError):
                     raise
-                raise QuackMCPError(f"Tool {name} failed: {e!s}")
+                raise QuackMCPError(f"Tool {name} failed: {e!s}") from e
+
+    async def _dispatch_tool(
+        self, name: str, arguments: dict[str, Any]
+    ) -> list[TextContent]:
+        """Dispatch tool call to appropriate handler."""
+        # Route to appropriate tool handler
+        if name == "load_csv":
+            args = LoadCSVArgs.model_validate(arguments)
+            return await self.data_tools.load_csv(args)
+        elif name == "load_multiple_csvs":
+            args = LoadMultipleCSVsArgs.model_validate(arguments)
+            return await self.data_tools.load_multiple_csvs(args)
+        elif name == "load_excel":
+            args = LoadExcelArgs.model_validate(arguments)
+            return await self.data_tools.load_excel(args)
+        elif name == "load_multiple_excels":
+            args = LoadMultipleExcelsArgs.model_validate(arguments)
+            return await self.data_tools.load_multiple_excels(args)
+        elif name == "query_csv":
+            args = QueryCSVArgs.model_validate(arguments)
+            return await self.analysis_tools.query_csv(args)
+        elif name == "describe_table":
+            args = DescribeTableArgs.model_validate(arguments)
+            return await self.analysis_tools.describe_table(args)
+        elif name == "list_tables":
+            return await self.analysis_tools.list_tables()
+        elif name == "analyze_csv":
+            args = AnalyzeCSVArgs.model_validate(arguments)
+            return await self.analysis_tools.analyze_csv(args)
+        elif name == "discover_csv_files":
+            args = DiscoverCSVFilesArgs.model_validate(arguments)
+            return await self.data_tools.discover_csv_files(args)
+        elif name == "discover_excel_files":
+            args = DiscoverExcelFilesArgs.model_validate(arguments)
+            return await self.data_tools.discover_excel_files(args)
+        elif name == "optimize_expenses":
+            args = OptimizeExpensesArgs.model_validate(arguments)
+            return await self.specialized_tools.optimize_expenses(args)
+        elif name == "detect_anomalies":
+            args = DetectAnomaliesArgs.model_validate(arguments)
+            return await self.specialized_tools.detect_anomalies(args)
+        else:
+            raise QuackMCPError(f"Unknown tool: {name}")
 
     def get_db_connection(self) -> duckdb.DuckDBPyConnection:
         """Get or create database connection."""
@@ -193,7 +199,7 @@ class QuackMCPServer:
             return [dict(zip(columns, row, strict=False)) for row in result]
 
         except Exception as e:
-            raise QueryError(f"Query execution failed: {e!s}", query)
+            raise QueryError(f"Query execution failed: {e!s}", query) from e
 
     async def inspect_table_schema(self, table_name: str) -> str:
         """Inspect table schema and return formatted information."""
@@ -202,14 +208,17 @@ class QuackMCPServer:
             schema = await self.execute_query(f"DESCRIBE {table_name}")
 
             # Get row count
-            count_result = await self.execute_query(f"SELECT COUNT(*) as row_count FROM {table_name}")
+            count_result = await self.execute_query(
+                f"SELECT COUNT(*) as row_count FROM {table_name}"
+            )
             row_count = count_result[0]["row_count"] if count_result else 0
 
             # Get sample data (first 3 rows)
-            sample_data = await self.execute_query(f"SELECT * FROM {table_name} LIMIT 3")
+            sample_data = await self.execute_query(
+                f"SELECT * FROM {table_name} LIMIT 3"
+            )
 
             # Format the inspection result
-            from .utils import format_sample_data, get_column_type_icon
 
             inspection = f'📊 TABLE INSPECTION: "{table_name}"\n'
             inspection += "━" * 50 + "\n"
@@ -225,12 +234,14 @@ class QuackMCPServer:
                 inspection += f"\n👀 SAMPLE DATA (first {len(sample_data)} rows):\n"
                 inspection += format_sample_data(sample_data, schema)
 
-            inspection += "\n💡 Ready for analysis! Use query_csv to explore the data with SQL."
-
-            return inspection
+            inspection += (
+                "\n💡 Ready for analysis! Use query_csv to explore the data with SQL."
+            )
 
         except Exception as e:
             return f"Schema inspection failed: {e!s}"
+        else:
+            return inspection
 
     def add_loaded_table(self, table_name: str, source_path: str) -> None:
         """Add table to loaded tables registry."""

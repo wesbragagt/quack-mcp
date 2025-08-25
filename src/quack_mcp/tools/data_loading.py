@@ -1,12 +1,13 @@
 """Data loading tools implementation."""
 
+import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mcp.types import TextContent
 
-from ..exceptions import CSVLoadError, ExcelLoadError, FileDiscoveryError
-from ..models import (
+from quack_mcp.exceptions import CSVLoadError, ExcelLoadError, FileDiscoveryError
+from quack_mcp.models import (
     DiscoverCSVFilesArgs,
     DiscoverExcelFilesArgs,
     LoadCSVArgs,
@@ -14,10 +15,10 @@ from ..models import (
     LoadMultipleCSVsArgs,
     LoadMultipleExcelsArgs,
 )
-from ..utils import escape_sql_string, is_glob_pattern, sanitize_table_name
+from quack_mcp.utils import escape_sql_string, is_glob_pattern, sanitize_table_name
 
 if TYPE_CHECKING:
-    from ..server import QuackMCPServer
+    from quack_mcp.server import QuackMCPServer
 
 
 class DataLoadingTools:
@@ -82,14 +83,14 @@ class DataLoadingTools:
             return [
                 TextContent(
                     type="text",
-                    text=f'Successfully loaded CSV file "{args.file_path}" as table "{table_name}"\n\n{schema_info}'
+                    text=f'Successfully loaded CSV file "{args.file_path}" as table "{table_name}"\n\n{schema_info}',
                 )
             ]
 
         except Exception as e:
             if isinstance(e, CSVLoadError):
                 raise
-            raise CSVLoadError(str(e), args.file_path)
+            raise CSVLoadError(str(e), args.file_path) from e
 
     async def _load_csv_glob(self, args: LoadCSVArgs) -> list[TextContent]:
         """Load CSV files using glob pattern."""
@@ -101,7 +102,9 @@ class DataLoadingTools:
             discovered_files = [row["file"] for row in glob_result]
 
             if not discovered_files:
-                raise CSVLoadError(f"No CSV files found matching pattern: {args.file_path}")
+                raise CSVLoadError(
+                    f"No CSV files found matching pattern: {args.file_path}"
+                )
 
             # Generate table name
             table_name = args.table_name or sanitize_table_name(f"csv_{args.file_path}")
@@ -149,14 +152,14 @@ class DataLoadingTools:
             return [
                 TextContent(
                     type="text",
-                    text=f'Successfully loaded {len(discovered_files)} CSV files matching "{args.file_path}" as table "{table_name}"\n\nFiles: {file_list}\n\n{schema_info}'
+                    text=f'Successfully loaded {len(discovered_files)} CSV files matching "{args.file_path}" as table "{table_name}"\n\nFiles: {file_list}\n\n{schema_info}',
                 )
             ]
 
         except Exception as e:
             if isinstance(e, CSVLoadError):
                 raise
-            raise CSVLoadError(str(e), args.file_path)
+            raise CSVLoadError(str(e), args.file_path) from e
 
     async def load_multiple_csvs(self, args: LoadMultipleCSVsArgs) -> list[TextContent]:
         """Load multiple CSV files."""
@@ -173,7 +176,9 @@ class DataLoadingTools:
                     discovered_files = [row["file"] for row in glob_result]
 
                     if not discovered_files:
-                        raise CSVLoadError(f"No CSV files found matching pattern: {args.pattern_or_files}")
+                        raise CSVLoadError(
+                            f"No CSV files found matching pattern: {args.pattern_or_files}"
+                        )
                 else:
                     # Single file path
                     if not Path(args.pattern_or_files).exists():
@@ -187,7 +192,9 @@ class DataLoadingTools:
                         raise CSVLoadError(f"File not found: {file_path}")
 
             # Build query
-            if isinstance(args.pattern_or_files, str) and is_glob_pattern(args.pattern_or_files):
+            if isinstance(args.pattern_or_files, str) and is_glob_pattern(
+                args.pattern_or_files
+            ):
                 # Use glob pattern directly
                 escaped_pattern = escape_sql_string(args.pattern_or_files)
                 read_csv_args = [
@@ -199,7 +206,9 @@ class DataLoadingTools:
                 ]
             else:
                 # Use file list
-                file_list = ", ".join(f"'{escape_sql_string(f)}'" for f in discovered_files)
+                file_list = ", ".join(
+                    f"'{escape_sql_string(f)}'" for f in discovered_files
+                )
                 read_csv_args = [
                     f"[{file_list}]",
                     f"header={str(args.header).lower()}",
@@ -209,8 +218,8 @@ class DataLoadingTools:
                 ]
 
             query = f"""
-                CREATE OR REPLACE TABLE "{table_name}" AS 
-                SELECT * FROM read_csv({', '.join(read_csv_args)})
+                CREATE OR REPLACE TABLE "{table_name}" AS
+                SELECT * FROM read_csv({", ".join(read_csv_args)})
             """
 
             # Execute query
@@ -239,7 +248,8 @@ class DataLoadingTools:
 
             file_count = len(discovered_files) if discovered_files else "multiple"
             files_text = (
-                ", ".join(discovered_files[:10]) + ("..." if len(discovered_files) > 10 else "")
+                ", ".join(discovered_files[:10])
+                + ("..." if len(discovered_files) > 10 else "")
                 if discovered_files
                 else "matched by pattern"
             )
@@ -247,14 +257,14 @@ class DataLoadingTools:
             return [
                 TextContent(
                     type="text",
-                    text=f'Successfully loaded {file_count} files as table "{table_name}"\n\nFiles processed: {files_text}\n\n{schema_info}'
+                    text=f'Successfully loaded {file_count} files as table "{table_name}"\n\nFiles processed: {files_text}\n\n{schema_info}',
                 )
             ]
 
         except Exception as e:
             if isinstance(e, CSVLoadError):
                 raise
-            raise CSVLoadError(f"Multi-CSV loading failed: {e!s}")
+            raise CSVLoadError(f"Multi-CSV loading failed: {e!s}") from e
 
     async def load_excel(self, args: LoadExcelArgs) -> list[TextContent]:
         """Load an Excel file into DuckDB."""
@@ -288,8 +298,8 @@ class DataLoadingTools:
                 query_params.append(", ".join(options))
 
             query = f"""
-                CREATE OR REPLACE TABLE "{table_name}" AS 
-                SELECT * FROM read_xlsx({', '.join(query_params)})
+                CREATE OR REPLACE TABLE "{table_name}" AS
+                SELECT * FROM read_xlsx({", ".join(query_params)})
             """
 
             # Execute query
@@ -303,7 +313,9 @@ class DataLoadingTools:
 
             if row_count == 0:
                 await self.server.execute_query(f'DROP TABLE IF EXISTS "{table_name}"')
-                raise ExcelLoadError("Excel file is empty or contains no valid data in the specified sheet/range")
+                raise ExcelLoadError(
+                    "Excel file is empty or contains no valid data in the specified sheet/range"
+                )
 
             # Register table
             self.server.add_loaded_table(table_name, str(file_path))
@@ -317,16 +329,18 @@ class DataLoadingTools:
             return [
                 TextContent(
                     type="text",
-                    text=f'Successfully loaded Excel file "{args.file_path}"{sheet_info}{range_info} as table "{table_name}"\n\n{schema_info}'
+                    text=f'Successfully loaded Excel file "{args.file_path}"{sheet_info}{range_info} as table "{table_name}"\n\n{schema_info}',
                 )
             ]
 
         except Exception as e:
             if isinstance(e, ExcelLoadError):
                 raise
-            raise ExcelLoadError(str(e), args.file_path)
+            raise ExcelLoadError(str(e), args.file_path) from e
 
-    async def load_multiple_excels(self, args: LoadMultipleExcelsArgs) -> list[TextContent]:
+    async def load_multiple_excels(
+        self, args: LoadMultipleExcelsArgs
+    ) -> list[TextContent]:
         """Load multiple Excel files."""
         try:
             table_name = sanitize_table_name(args.table_name)
@@ -341,7 +355,9 @@ class DataLoadingTools:
                     discovered_files = [row["file"] for row in glob_result]
 
                     if not discovered_files:
-                        raise ExcelLoadError(f"No Excel files found matching pattern: {args.pattern_or_files}")
+                        raise ExcelLoadError(
+                            f"No Excel files found matching pattern: {args.pattern_or_files}"
+                        )
                 else:
                     # Single file path
                     if not Path(args.pattern_or_files).exists():
@@ -355,38 +371,48 @@ class DataLoadingTools:
                         raise ExcelLoadError(f"File not found: {file_path}")
 
             # Validate Excel files
-            non_xlsx_files = [f for f in discovered_files if not f.lower().endswith(".xlsx")]
+            non_xlsx_files = [
+                f for f in discovered_files if not f.lower().endswith(".xlsx")
+            ]
             if non_xlsx_files:
-                raise ExcelLoadError(f"Found non-xlsx files: {', '.join(non_xlsx_files)}. Only .xlsx files are supported.")
+                raise ExcelLoadError(
+                    f"Found non-xlsx files: {', '.join(non_xlsx_files)}. Only .xlsx files are supported."
+                )
 
             # Ensure Excel extension is loaded
             await self._ensure_excel_extension()
 
             # Build query
-            if isinstance(args.pattern_or_files, str) and is_glob_pattern(args.pattern_or_files):
+            if isinstance(args.pattern_or_files, str) and is_glob_pattern(
+                args.pattern_or_files
+            ):
                 # Use glob pattern directly
                 escaped_pattern = escape_sql_string(args.pattern_or_files)
                 read_excel_source = f"'{escaped_pattern}'"
             else:
                 # Use file list
-                file_list = ", ".join(f"'{escape_sql_string(f)}'" for f in discovered_files)
+                file_list = ", ".join(
+                    f"'{escape_sql_string(f)}'" for f in discovered_files
+                )
                 read_excel_source = f"[{file_list}]"
 
             # Build options
             options = []
             if args.sheet:
                 options.append(f"sheet='{escape_sql_string(args.sheet)}'")
-            options.extend([
-                f"header={str(args.header).lower()}",
-                f"union_by_name={str(args.union_by_name).lower()}",
-                f"filename={str(args.include_filename).lower()}",
-            ])
+            options.extend(
+                [
+                    f"header={str(args.header).lower()}",
+                    f"union_by_name={str(args.union_by_name).lower()}",
+                    f"filename={str(args.include_filename).lower()}",
+                ]
+            )
             if args.all_varchar:
                 options.append(f"all_varchar={str(args.all_varchar).lower()}")
 
             query = f"""
-                CREATE OR REPLACE TABLE "{table_name}" AS 
-                SELECT * FROM read_xlsx({read_excel_source}, {', '.join(options)})
+                CREATE OR REPLACE TABLE "{table_name}" AS
+                SELECT * FROM read_xlsx({read_excel_source}, {", ".join(options)})
             """
 
             # Execute query
@@ -415,7 +441,8 @@ class DataLoadingTools:
 
             file_count = len(discovered_files) if discovered_files else "multiple"
             files_text = (
-                ", ".join(discovered_files[:10]) + ("..." if len(discovered_files) > 10 else "")
+                ", ".join(discovered_files[:10])
+                + ("..." if len(discovered_files) > 10 else "")
                 if discovered_files
                 else "matched by pattern"
             )
@@ -424,14 +451,14 @@ class DataLoadingTools:
             return [
                 TextContent(
                     type="text",
-                    text=f'Successfully loaded {file_count} Excel files{sheet_info} as table "{table_name}"\n\nFiles processed: {files_text}\n\n{schema_info}'
+                    text=f'Successfully loaded {file_count} Excel files{sheet_info} as table "{table_name}"\n\nFiles processed: {files_text}\n\n{schema_info}',
                 )
             ]
 
         except Exception as e:
             if isinstance(e, ExcelLoadError):
                 raise
-            raise ExcelLoadError(f"Multi-Excel loading failed: {e!s}")
+            raise ExcelLoadError(f"Multi-Excel loading failed: {e!s}") from e
 
     async def discover_csv_files(self, args: DiscoverCSVFilesArgs) -> list[TextContent]:
         """Discover CSV files matching a glob pattern."""
@@ -452,22 +479,26 @@ class DataLoadingTools:
                 try:
                     path = Path(file_path)
                     stats = path.stat()
-                    file_info.append({
-                        "path": file_path,
-                        "size": stats.st_size,
-                        "modified": stats.st_mtime,
-                        "exists": True,
-                    })
+                    file_info.append(
+                        {
+                            "path": file_path,
+                            "size": stats.st_size,
+                            "modified": stats.st_mtime,
+                            "exists": True,
+                        }
+                    )
                     total_size += stats.st_size
                     existing_count += 1
                 except Exception:
-                    file_info.append({
-                        "path": file_path,
-                        "size": 0,
-                        "modified": None,
-                        "exists": False,
-                        "error": "File not accessible",
-                    })
+                    file_info.append(
+                        {
+                            "path": file_path,
+                            "size": 0,
+                            "modified": None,
+                            "exists": False,
+                            "error": "File not accessible",
+                        }
+                    )
 
             # Format response
             response = f'Found {len(files)} files matching pattern "{args.pattern}"\n\n'
@@ -478,8 +509,9 @@ class DataLoadingTools:
             for info in file_info:
                 if info["exists"]:
                     size_kb = info["size"] / 1024
-                    import datetime
-                    modified_time = datetime.datetime.fromtimestamp(info["modified"]).isoformat()
+                    modified_time = datetime.datetime.fromtimestamp(
+                        info["modified"]
+                    ).isoformat()
                     response += f"- {info['path']} ({size_kb:.1f} KB, modified: {modified_time})\n"
                 else:
                     response += f"- {info['path']} (NOT FOUND)\n"
@@ -487,9 +519,11 @@ class DataLoadingTools:
             return [TextContent(type="text", text=response)]
 
         except Exception as e:
-            raise FileDiscoveryError(str(e), args.pattern)
+            raise FileDiscoveryError(str(e), args.pattern) from e
 
-    async def discover_excel_files(self, args: DiscoverExcelFilesArgs) -> list[TextContent]:
+    async def discover_excel_files(
+        self, args: DiscoverExcelFilesArgs
+    ) -> list[TextContent]:
         """Discover Excel files matching a glob pattern."""
         try:
             # Use DuckDB's glob function
@@ -512,22 +546,26 @@ class DataLoadingTools:
                 try:
                     path = Path(file_path)
                     stats = path.stat()
-                    file_info.append({
-                        "path": file_path,
-                        "size": stats.st_size,
-                        "modified": stats.st_mtime,
-                        "exists": True,
-                    })
+                    file_info.append(
+                        {
+                            "path": file_path,
+                            "size": stats.st_size,
+                            "modified": stats.st_mtime,
+                            "exists": True,
+                        }
+                    )
                     total_size += stats.st_size
                     existing_count += 1
                 except Exception:
-                    file_info.append({
-                        "path": file_path,
-                        "size": 0,
-                        "modified": None,
-                        "exists": False,
-                        "error": "File not accessible",
-                    })
+                    file_info.append(
+                        {
+                            "path": file_path,
+                            "size": 0,
+                            "modified": None,
+                            "exists": False,
+                            "error": "File not accessible",
+                        }
+                    )
 
             # Format response
             response = f'Found {len(files)} files matching pattern "{args.pattern}"\n\n'
@@ -536,10 +574,14 @@ class DataLoadingTools:
 
             if excel_files:
                 response += f"Existing Excel files: {existing_count}\n"
-                response += f"Total Excel file size: {total_size / 1024 / 1024:.2f} MB\n\n"
+                response += (
+                    f"Total Excel file size: {total_size / 1024 / 1024:.2f} MB\n\n"
+                )
 
             if non_excel_files:
-                response += "\n⚠️  Non-Excel files found (will be ignored by Excel tools):\n"
+                response += (
+                    "\n⚠️  Non-Excel files found (will be ignored by Excel tools):\n"
+                )
                 for file in non_excel_files[:5]:
                     response += f"- {file}\n"
                 if len(non_excel_files) > 5:
@@ -550,8 +592,9 @@ class DataLoadingTools:
                 for info in file_info:
                     if info["exists"]:
                         size_kb = info["size"] / 1024
-                        import datetime
-                        modified_time = datetime.datetime.fromtimestamp(info["modified"]).isoformat()
+                        modified_time = datetime.datetime.fromtimestamp(
+                            info["modified"]
+                        ).isoformat()
                         response += f"- {info['path']} ({size_kb:.1f} KB, modified: {modified_time})\n"
                     else:
                         response += f"- {info['path']} (NOT FOUND)\n"
@@ -561,7 +604,7 @@ class DataLoadingTools:
             return [TextContent(type="text", text=response)]
 
         except Exception as e:
-            raise FileDiscoveryError(str(e), args.pattern)
+            raise FileDiscoveryError(str(e), args.pattern) from e
 
     async def _ensure_excel_extension(self) -> None:
         """Ensure Excel extension is loaded."""

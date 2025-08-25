@@ -4,12 +4,12 @@ from typing import TYPE_CHECKING
 
 from mcp.types import TextContent
 
-from ..exceptions import QueryError, TableNotFoundError
-from ..models import AnalyzeCSVArgs, DescribeTableArgs, QueryCSVArgs
-from ..utils import safe_json_dumps
+from quack_mcp.exceptions import QueryError, TableNotFoundError
+from quack_mcp.models import AnalyzeCSVArgs, DescribeTableArgs, QueryCSVArgs
+from quack_mcp.utils import safe_json_dumps
 
 if TYPE_CHECKING:
-    from ..server import QuackMCPServer
+    from quack_mcp.server import QuackMCPServer
 
 
 class AnalysisTools:
@@ -25,7 +25,7 @@ class AnalysisTools:
             result = await self.server.execute_query(args.query)
             return [TextContent(type="text", text=safe_json_dumps(result))]
         except Exception as e:
-            raise QueryError(str(e), args.query)
+            raise QueryError(str(e), args.query) from e
 
     async def describe_table(self, args: DescribeTableArgs) -> list[TextContent]:
         """Get schema information for a loaded table."""
@@ -41,13 +41,13 @@ class AnalysisTools:
             return [
                 TextContent(
                     type="text",
-                    text=f'Schema for table "{args.table_name}":\n{safe_json_dumps(result)}'
+                    text=f'Schema for table "{args.table_name}":\n{safe_json_dumps(result)}',
                 )
             ]
         except TableNotFoundError:
             raise
         except Exception as e:
-            raise QueryError(f"Failed to describe table: {e!s}")
+            raise QueryError(f"Failed to describe table: {e!s}") from e
 
     async def list_tables(self) -> list[TextContent]:
         """List all loaded tables."""
@@ -60,12 +60,11 @@ class AnalysisTools:
 
             return [
                 TextContent(
-                    type="text",
-                    text=f"Loaded tables:\n{safe_json_dumps(tables)}"
+                    type="text", text=f"Loaded tables:\n{safe_json_dumps(tables)}"
                 )
             ]
         except Exception as e:
-            raise QueryError(f"Failed to list tables: {e!s}")
+            raise QueryError(f"Failed to list tables: {e!s}") from e
 
     async def analyze_csv(self, args: AnalyzeCSVArgs) -> list[TextContent]:
         """Perform basic statistical analysis on CSV data."""
@@ -92,7 +91,7 @@ class AnalysisTools:
             else:
                 # General analysis
                 query = f"""
-                    SELECT 
+                    SELECT
                         COUNT(*) as total_rows,
                         COUNT(*) - COUNT(*) as missing_values
                     FROM {args.table_name}
@@ -103,11 +102,11 @@ class AnalysisTools:
             return [
                 TextContent(
                     type="text",
-                    text=f'Analysis for table "{args.table_name}":\n{safe_json_dumps(result)}'
+                    text=f'Analysis for table "{args.table_name}":\n{safe_json_dumps(result)}',
                 )
             ]
 
         except TableNotFoundError:
             raise
         except Exception as e:
-            raise QueryError(f"Analysis failed: {e!s}")
+            raise QueryError(f"Analysis failed: {e!s}") from e

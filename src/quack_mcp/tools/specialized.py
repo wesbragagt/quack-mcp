@@ -1,14 +1,15 @@
 """Specialized analytics tools implementation."""
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from mcp.types import TextContent
 
-from ..exceptions import QueryError, TableNotFoundError
-from ..models import DetectAnomaliesArgs, OptimizeExpensesArgs
+from quack_mcp.exceptions import QueryError, TableNotFoundError
+from quack_mcp.models import DetectAnomaliesArgs, OptimizeExpensesArgs
 
 if TYPE_CHECKING:
-    from ..server import QuackMCPServer
+    from quack_mcp.server import QuackMCPServer
 
 
 class SpecializedTools:
@@ -35,7 +36,7 @@ class SpecializedTools:
         except TableNotFoundError:
             raise
         except Exception as e:
-            raise QueryError(f"Expense optimization failed: {e!s}")
+            raise QueryError(f"Expense optimization failed: {e!s}") from e
 
     async def detect_anomalies(self, args: DetectAnomaliesArgs) -> list[TextContent]:
         """Detect anomalies and irregularities in dataset."""
@@ -57,7 +58,7 @@ class SpecializedTools:
         except TableNotFoundError:
             raise
         except Exception as e:
-            raise QueryError(f"Anomaly detection failed: {e!s}")
+            raise QueryError(f"Anomaly detection failed: {e!s}") from e
 
     async def _generate_expense_optimization_report(
         self, table_name: str, amount_col: str, name_col: str, date_col: str
@@ -66,27 +67,27 @@ class SpecializedTools:
 
         # 1. Monthly expense summary
         monthly_query = f"""
-            SELECT 
+            SELECT
                 strftime('%Y-%m', {date_col}) as month,
                 COUNT(*) as transaction_count,
                 ROUND(SUM(CASE WHEN {amount_col} < 0 THEN ABS({amount_col}) ELSE 0 END), 2) as total_expenses,
                 ROUND(MAX(CASE WHEN {amount_col} < 0 THEN ABS({amount_col}) ELSE 0 END), 2) as largest_expense
-            FROM {table_name} 
+            FROM {table_name}
             GROUP BY strftime('%Y-%m', {date_col})
             ORDER BY month
         """
 
         # 2. Subscription analysis (recurring charges)
         subscription_query = f"""
-            SELECT 
+            SELECT
                 {name_col} as name,
                 ROUND(ABS({amount_col}), 2) as amount,
                 COUNT(*) as frequency,
                 ROUND(SUM(ABS({amount_col})), 2) as total_spent,
                 MIN({date_col}) as first_charge,
                 MAX({date_col}) as last_charge
-            FROM {table_name} 
-            WHERE {amount_col} < 0 
+            FROM {table_name}
+            WHERE {amount_col} < 0
             GROUP BY {name_col}, ROUND(ABS({amount_col}), 2)
             HAVING COUNT(*) >= 2 AND ABS({amount_col}) < 100
             ORDER BY frequency DESC, total_spent DESC
@@ -95,8 +96,8 @@ class SpecializedTools:
 
         # 3. Small frequent purchases analysis
         small_purchases_query = f"""
-            SELECT 
-                CASE 
+            SELECT
+                CASE
                     WHEN {name_col} LIKE '%COFFEE%' OR {name_col} LIKE '%STARBUCKS%' OR {name_col} LIKE '%DUNKIN%' THEN 'Coffee Shops'
                     WHEN {name_col} LIKE '%CUSTARD%' OR {name_col} LIKE '%ICE CREAM%' THEN 'Ice Cream/Desserts'
                     WHEN {name_col} LIKE '%RESTAURANT%' OR {name_col} LIKE '%GRILL%' OR {name_col} LIKE '%PIZZA%' OR {name_col} LIKE '%TACO%' OR {name_col} LIKE '%CULVERS%' THEN 'Restaurants'
@@ -108,7 +109,7 @@ class SpecializedTools:
                 COUNT(*) as transaction_count,
                 ROUND(SUM(ABS({amount_col})), 2) as total_spent,
                 ROUND(AVG(ABS({amount_col})), 2) as avg_amount
-            FROM {table_name} 
+            FROM {table_name}
             WHERE {amount_col} < 0 AND ABS({amount_col}) < 50
             GROUP BY category
             HAVING transaction_count >= 3
@@ -117,28 +118,35 @@ class SpecializedTools:
 
         # 4. Grocery spending analysis
         grocery_query = f"""
-            SELECT 
+            SELECT
                 strftime('%Y-%m', {date_col}) as month,
                 COUNT(*) as grocery_trips,
                 ROUND(SUM(ABS({amount_col})), 2) as total_grocery_spend,
                 ROUND(AVG(ABS({amount_col})), 2) as avg_per_trip,
                 ROUND(MIN(ABS({amount_col})), 2) as min_spend,
                 ROUND(MAX(ABS({amount_col})), 2) as max_spend
-            FROM {table_name} 
+            FROM {table_name}
             WHERE {amount_col} < 0 AND ({name_col} LIKE '%KROGER%' OR {name_col} LIKE '%TARGET%')
             GROUP BY strftime('%Y-%m', {date_col})
             ORDER BY month
         """
 
         # Execute all queries
-        monthly_data, subscriptions, small_purchases, grocery_data = await asyncio.gather(
+        (
+            monthly_data,
+            subscriptions,
+            small_purchases,
+            grocery_data,
+        ) = await asyncio.gather(
             self.server.execute_query(monthly_query),
             self.server.execute_query(subscription_query),
             self.server.execute_query(small_purchases_query),
             self.server.execute_query(grocery_query),
         )
 
-        return self._format_optimization_report(monthly_data, subscriptions, small_purchases, grocery_data)
+        return self._format_optimization_report(
+            monthly_data, subscriptions, small_purchases, grocery_data
+        )
 
     def _format_optimization_report(
         self,
@@ -166,7 +174,9 @@ class SpecializedTools:
 
         # Subscription analysis
         if subscriptions:
-            subscription_total = sum(sub.get("total_spent", 0) or 0 for sub in subscriptions)
+            subscription_total = sum(
+                sub.get("total_spent", 0) or 0 for sub in subscriptions
+            )
             monthly_sub_total = subscription_total / 3  # Assuming 3-month period
 
             report += f"**1. Subscription Audit** - Potential savings: ${monthly_sub_total * 0.3:.0f}/month\n"
@@ -181,13 +191,30 @@ class SpecializedTools:
             report += "**Actions**: Cancel unused services, switch to annual plans for discounts\n\n"
 
         # Small purchases analysis
-        coffee_data = next((cat for cat in small_purchases if cat.get("category") == "Coffee Shops"), None)
-        treat_data = next((cat for cat in small_purchases if cat.get("category") == "Ice Cream/Desserts"), None)
-        restaurant_data = next((cat for cat in small_purchases if cat.get("category") == "Restaurants"), None)
+        coffee_data = next(
+            (cat for cat in small_purchases if cat.get("category") == "Coffee Shops"),
+            None,
+        )
+        treat_data = next(
+            (
+                cat
+                for cat in small_purchases
+                if cat.get("category") == "Ice Cream/Desserts"
+            ),
+            None,
+        )
+        restaurant_data = next(
+            (cat for cat in small_purchases if cat.get("category") == "Restaurants"),
+            None,
+        )
 
         if coffee_data or treat_data:
-            coffee_monthly = (coffee_data.get("total_spent", 0) or 0) / 3 if coffee_data else 0
-            treat_monthly = (treat_data.get("total_spent", 0) or 0) / 3 if treat_data else 0
+            coffee_monthly = (
+                (coffee_data.get("total_spent", 0) or 0) / 3 if coffee_data else 0
+            )
+            treat_monthly = (
+                (treat_data.get("total_spent", 0) or 0) / 3 if treat_data else 0
+            )
             total_savings = (coffee_monthly + treat_monthly) * 0.7
 
             report += f"**2. Coffee & Treats** - Potential savings: ${total_savings:.0f}/month\n"
@@ -206,14 +233,18 @@ class SpecializedTools:
 
             report += f"**3. Dining Out** - Potential savings: ${restaurant_savings:.0f}/month\n"
             report += f"• {transaction_count} restaurant visits = ${restaurant_monthly:.0f}/month\n"
-            report += "**Actions**: Limit to 1-2 restaurant visits per week, meal prep\n\n"
+            report += (
+                "**Actions**: Limit to 1-2 restaurant visits per week, meal prep\n\n"
+            )
 
         # Medium-impact opportunities
         report += "### 🔍 MEDIUM-IMPACT Opportunities (Save $25-100 monthly)\n\n"
 
         # Grocery optimization
         if grocery_data:
-            avg_grocery_spend = sum(month.get("total_grocery_spend", 0) or 0 for month in grocery_data) / len(grocery_data)
+            avg_grocery_spend = sum(
+                month.get("total_grocery_spend", 0) or 0 for month in grocery_data
+            ) / len(grocery_data)
             potential_savings = avg_grocery_spend * 0.15
 
             report += f"**4. Grocery Optimization** - Potential savings: ${potential_savings:.0f}/month\n"
@@ -227,7 +258,9 @@ class SpecializedTools:
             report += "**Actions**: Plan weekly meals, set $75 budget per trip, use store apps for coupons\n\n"
 
         # Small purchases breakdown
-        small_purchases_total = sum(cat.get("total_spent", 0) or 0 for cat in small_purchases)
+        small_purchases_total = sum(
+            cat.get("total_spent", 0) or 0 for cat in small_purchases
+        )
         if small_purchases_total > 0:
             potential_savings = small_purchases_total * 0.2 / 3
             report += f"**5. Small Purchase Optimization** - Potential savings: ${potential_savings:.0f}/month\n"
@@ -241,12 +274,34 @@ class SpecializedTools:
             report += "**Actions**: Use 24-hour rule for non-essentials, batch small purchases\n\n"
 
         # Summary
-        subscription_savings = (sum(sub.get("total_spent", 0) or 0 for sub in subscriptions) * 0.3 / 3) if subscriptions else 0
-        coffee_treat_savings = ((coffee_data.get("total_spent", 0) or 0) + (treat_data.get("total_spent", 0) or 0)) * 0.7 / 3 if (coffee_data or treat_data) else 0
-        restaurant_savings_calc = (restaurant_data.get("total_spent", 0) or 0) * 0.4 / 3 if restaurant_data else 0
+        subscription_savings = (
+            (sum(sub.get("total_spent", 0) or 0 for sub in subscriptions) * 0.3 / 3)
+            if subscriptions
+            else 0
+        )
+        coffee_treat_savings = (
+            (
+                (coffee_data.get("total_spent", 0) or 0)
+                + (treat_data.get("total_spent", 0) or 0)
+            )
+            * 0.7
+            / 3
+            if (coffee_data or treat_data)
+            else 0
+        )
+        restaurant_savings_calc = (
+            (restaurant_data.get("total_spent", 0) or 0) * 0.4 / 3
+            if restaurant_data
+            else 0
+        )
         small_purchases_savings = small_purchases_total * 0.2 / 3
 
-        total_potential_savings = subscription_savings + coffee_treat_savings + restaurant_savings_calc + small_purchases_savings
+        total_potential_savings = (
+            subscription_savings
+            + coffee_treat_savings
+            + restaurant_savings_calc
+            + small_purchases_savings
+        )
 
         report += f"### 📈 **Total Monthly Savings Potential: ${total_potential_savings:.0f}+**\n\n"
         report += "**Implementation Priority**:\n"
@@ -254,7 +309,9 @@ class SpecializedTools:
         report += "2. **Coffee routine change** (highest ROI)\n"
         report += "3. **Meal planning** (reduces grocery + restaurant costs)\n"
         report += "4. **Small purchase discipline** (builds long-term habits)\n\n"
-        report += "💡 **Tip**: Start with one category per month to build sustainable habits."
+        report += (
+            "💡 **Tip**: Start with one category per month to build sustainable habits."
+        )
 
         return report
 
@@ -272,42 +329,54 @@ class SpecializedTools:
 
         # Get table schema for analysis
         schema = await self.server.execute_query(f"DESCRIBE {table_name}")
-        total_rows_result = await self.server.execute_query(f"SELECT COUNT(*) as count FROM {table_name}")
+        total_rows_result = await self.server.execute_query(
+            f"SELECT COUNT(*) as count FROM {table_name}"
+        )
         total_rows = total_rows_result[0]["count"] if total_rows_result else 0
 
         report = f"# 🔍 Anomaly Detection Report\n**Table:** {table_name} ({total_rows:,} rows)\n**Severity Threshold:** {severity_threshold}\n\n"
 
         # 1. DUPLICATE DETECTION
         if "duplicates" in anomaly_types:
-            duplicate_anomalies = await self._check_duplicates(table_name, schema, focus_columns)
+            duplicate_anomalies = await self._check_duplicates(
+                table_name, schema, focus_columns
+            )
             for dup in duplicate_anomalies:
                 if severity_order.get(dup["severity"], 0) >= min_severity:
                     anomalies.append(dup)
 
         # 2. NULL VALUE ANALYSIS
         if "nulls" in anomaly_types:
-            null_anomalies = await self._check_null_values(table_name, schema, total_rows, focus_columns)
+            null_anomalies = await self._check_null_values(
+                table_name, schema, total_rows, focus_columns
+            )
             for null_anomaly in null_anomalies:
                 if severity_order.get(null_anomaly["severity"], 0) >= min_severity:
                     anomalies.append(null_anomaly)
 
         # 3. STATISTICAL OUTLIERS
         if "statistical" in anomaly_types or "outliers" in anomaly_types:
-            outlier_anomalies = await self._check_statistical_outliers(table_name, schema, focus_columns)
+            outlier_anomalies = await self._check_statistical_outliers(
+                table_name, schema, focus_columns
+            )
             for outlier in outlier_anomalies:
                 if severity_order.get(outlier["severity"], 0) >= min_severity:
                     anomalies.append(outlier)
 
         # 4. PATTERN ANALYSIS
         if "patterns" in anomaly_types:
-            pattern_anomalies = await self._check_pattern_anomalies(table_name, schema, focus_columns)
+            pattern_anomalies = await self._check_pattern_anomalies(
+                table_name, schema, focus_columns
+            )
             for pattern in pattern_anomalies:
                 if severity_order.get(pattern["severity"], 0) >= min_severity:
                     anomalies.append(pattern)
 
         # 5. BUSINESS LOGIC RULES
         if "business_logic" in anomaly_types:
-            business_anomalies = await self._check_business_logic_anomalies(table_name, schema)
+            business_anomalies = await self._check_business_logic_anomalies(
+                table_name, schema
+            )
             for business in business_anomalies:
                 if severity_order.get(business["severity"], 0) >= min_severity:
                     anomalies.append(business)
@@ -365,13 +434,15 @@ class SpecializedTools:
     ) -> list[dict[str, Any]]:
         """Check for duplicate values in columns."""
         anomalies = []
-        columns_to_check = focus_columns if focus_columns else [col["column_name"] for col in schema]
+        columns_to_check = (
+            focus_columns if focus_columns else [col["column_name"] for col in schema]
+        )
 
         for column in columns_to_check[:8]:  # Limit to prevent excessive queries
             try:
                 duplicate_query = f"""
                     SELECT {column}, COUNT(*) as duplicate_count
-                    FROM {table_name} 
+                    FROM {table_name}
                     WHERE {column} IS NOT NULL
                     GROUP BY {column}
                     HAVING COUNT(*) > 1
@@ -382,8 +453,12 @@ class SpecializedTools:
                 duplicates = await self.server.execute_query(duplicate_query)
 
                 if duplicates:
-                    total_duplicate_records = sum(dup.get("duplicate_count", 0) or 0 for dup in duplicates)
-                    max_duplicates = max(dup.get("duplicate_count", 0) or 0 for dup in duplicates)
+                    total_duplicate_records = sum(
+                        dup.get("duplicate_count", 0) or 0 for dup in duplicates
+                    )
+                    max_duplicates = max(
+                        dup.get("duplicate_count", 0) or 0 for dup in duplicates
+                    )
 
                     if max_duplicates > 50000:
                         severity = "critical"
@@ -395,20 +470,24 @@ class SpecializedTools:
                         severity = "low"
 
                     examples = "\n".join(
-                        f"{list(d.values())[0]}: {d.get('duplicate_count', 0)} occurrences"
+                        f"{next(iter(d.values()))}: {d.get('duplicate_count', 0)} occurrences"
                         for d in duplicates[:3]
                     )
 
-                    anomalies.append({
-                        "type": "duplicate",
-                        "severity": severity,
-                        "title": f"Duplicate Values in {column}",
-                        "impact": "Data integrity, potential processing errors",
-                        "affected_records": total_duplicate_records,
-                        "description": f"Found {len(duplicates)} unique values with duplicates, max {max_duplicates} occurrences",
-                        "examples": examples,
-                        "recommendation": "URGENT: Investigate data corruption, tracking number system failure" if max_duplicates > 1000 else "Review business logic for duplicates",
-                    })
+                    anomalies.append(
+                        {
+                            "type": "duplicate",
+                            "severity": severity,
+                            "title": f"Duplicate Values in {column}",
+                            "impact": "Data integrity, potential processing errors",
+                            "affected_records": total_duplicate_records,
+                            "description": f"Found {len(duplicates)} unique values with duplicates, max {max_duplicates} occurrences",
+                            "examples": examples,
+                            "recommendation": "URGENT: Investigate data corruption, tracking number system failure"
+                            if max_duplicates > 1000
+                            else "Review business logic for duplicates",
+                        }
+                    )
             except Exception:
                 # Skip columns that can't be analyzed
                 continue
@@ -416,11 +495,17 @@ class SpecializedTools:
         return anomalies
 
     async def _check_null_values(
-        self, table_name: str, schema: list[dict[str, Any]], total_rows: int, focus_columns: list[str]
+        self,
+        table_name: str,
+        schema: list[dict[str, Any]],
+        total_rows: int,
+        focus_columns: list[str],
     ) -> list[dict[str, Any]]:
         """Check for excessive null values."""
         anomalies = []
-        columns_to_check = focus_columns if focus_columns else [col["column_name"] for col in schema]
+        columns_to_check = (
+            focus_columns if focus_columns else [col["column_name"] for col in schema]
+        )
 
         for column_info in schema:
             column = column_info["column_name"]
@@ -429,7 +514,7 @@ class SpecializedTools:
 
             try:
                 null_query = f"""
-                    SELECT 
+                    SELECT
                         COUNT(*) - COUNT({column}) as null_count,
                         ROUND((COUNT(*) - COUNT({column})) * 100.0 / COUNT(*), 2) as null_percentage
                     FROM {table_name}
@@ -453,16 +538,20 @@ class SpecializedTools:
                         severity = "low"
 
                     if severity != "low" or null_count > 100:
-                        anomalies.append({
-                            "type": "null_values",
-                            "severity": severity,
-                            "title": f"High Null Rate in {column}",
-                            "impact": "Data completeness, analysis accuracy",
-                            "affected_records": null_count,
-                            "percentage": null_percentage,
-                            "description": f"{null_count} null values ({null_percentage}% of total)",
-                            "recommendation": "Investigate data source, implement validation" if null_percentage > 25 else "Consider default values or imputation",
-                        })
+                        anomalies.append(
+                            {
+                                "type": "null_values",
+                                "severity": severity,
+                                "title": f"High Null Rate in {column}",
+                                "impact": "Data completeness, analysis accuracy",
+                                "affected_records": null_count,
+                                "percentage": null_percentage,
+                                "description": f"{null_count} null values ({null_percentage}% of total)",
+                                "recommendation": "Investigate data source, implement validation"
+                                if null_percentage > 25
+                                else "Consider default values or imputation",
+                            }
+                        )
             except Exception:
                 # Skip columns that can't be analyzed
                 continue
@@ -475,8 +564,12 @@ class SpecializedTools:
         """Check for statistical outliers in numeric columns."""
         anomalies = []
         numeric_columns = [
-            col for col in schema
-            if any(t in col["column_type"].upper() for t in ["DOUBLE", "BIGINT", "INTEGER", "DECIMAL", "NUMERIC"])
+            col
+            for col in schema
+            if any(
+                t in col["column_type"].upper()
+                for t in ["DOUBLE", "BIGINT", "INTEGER", "DECIMAL", "NUMERIC"]
+            )
         ]
 
         columns_to_check = (
@@ -490,13 +583,13 @@ class SpecializedTools:
 
             try:
                 stats_query = f"""
-                    SELECT 
+                    SELECT
                         AVG({column}) as mean,
                         MIN({column}) as min_val,
                         MAX({column}) as max_val,
                         STDDEV({column}) as stddev,
                         COUNT(*) as total_count
-                    FROM {table_name} 
+                    FROM {table_name}
                     WHERE {column} IS NOT NULL
                 """
 
@@ -516,7 +609,7 @@ class SpecializedTools:
                     outlier_query = f"""
                         SELECT COUNT(*) as outlier_count
                         FROM {table_name}
-                        WHERE {column} IS NOT NULL 
+                        WHERE {column} IS NOT NULL
                           AND ({column} > {mean + 3 * stddev} OR {column} < {mean - 3 * stddev})
                     """
 
@@ -525,7 +618,9 @@ class SpecializedTools:
                         continue
 
                     outlier_count = outlier_result[0].get("outlier_count", 0) or 0
-                    outlier_percentage = (outlier_count / total_count) * 100 if total_count > 0 else 0
+                    outlier_percentage = (
+                        (outlier_count / total_count) * 100 if total_count > 0 else 0
+                    )
 
                     if outlier_count > 0:
                         if outlier_percentage > 5:
@@ -539,14 +634,16 @@ class SpecializedTools:
                         example_query = f"""
                             SELECT {column}
                             FROM {table_name}
-                            WHERE {column} IS NOT NULL 
+                            WHERE {column} IS NOT NULL
                               AND ({column} > {mean + 3 * stddev} OR {column} < {mean - 3 * stddev})
                             ORDER BY ABS({column} - {mean}) DESC
                             LIMIT 5
                         """
 
                         try:
-                            examples_result = await self.server.execute_query(example_query)
+                            examples_result = await self.server.execute_query(
+                                example_query
+                            )
                             example_values = [str(e[column]) for e in examples_result]
                             example_text = ", ".join(example_values)
                         except Exception:
@@ -555,17 +652,19 @@ class SpecializedTools:
                         method = f"3σ (mean: {mean:.2f}, σ: {stddev:.2f})"
                         examples = f"Range: {min_val} to {max_val}\nOutlier examples: {example_text}"
 
-                        anomalies.append({
-                            "type": "statistical_outlier",
-                            "severity": severity,
-                            "title": f"Statistical Outliers in {column}",
-                            "impact": "Potential data quality issues, skewed analysis",
-                            "affected_records": outlier_count,
-                            "percentage": round(outlier_percentage, 2),
-                            "description": f"{outlier_count} values identified using {method}",
-                            "examples": examples,
-                            "recommendation": "Investigate extreme values, consider data validation rules",
-                        })
+                        anomalies.append(
+                            {
+                                "type": "statistical_outlier",
+                                "severity": severity,
+                                "title": f"Statistical Outliers in {column}",
+                                "impact": "Potential data quality issues, skewed analysis",
+                                "affected_records": outlier_count,
+                                "percentage": round(outlier_percentage, 2),
+                                "description": f"{outlier_count} values identified using {method}",
+                                "examples": examples,
+                                "recommendation": "Investigate extreme values, consider data validation rules",
+                            }
+                        )
             except Exception:
                 # Skip columns that can't be analyzed
                 continue
@@ -579,7 +678,8 @@ class SpecializedTools:
         anomalies = []
 
         string_columns = [
-            col for col in schema
+            col
+            for col in schema
             if any(t in col["column_type"].upper() for t in ["VARCHAR", "TEXT", "CHAR"])
         ]
 
@@ -595,7 +695,7 @@ class SpecializedTools:
             try:
                 # Check for unusual length patterns
                 length_query = f"""
-                    SELECT 
+                    SELECT
                         LENGTH({column}) as str_length,
                         COUNT(*) as count
                     FROM {table_name}
@@ -609,12 +709,16 @@ class SpecializedTools:
 
                 # Look for extremely short or long values
                 extreme_lengths = [
-                    r for r in length_results
-                    if (r.get("str_length", 0) or 0) > 200 or (r.get("str_length", 0) or 0) < 1
+                    r
+                    for r in length_results
+                    if (r.get("str_length", 0) or 0) > 200
+                    or (r.get("str_length", 0) or 0) < 1
                 ]
 
                 if extreme_lengths:
-                    affected_count = sum(r.get("count", 0) or 0 for r in extreme_lengths)
+                    affected_count = sum(
+                        r.get("count", 0) or 0 for r in extreme_lengths
+                    )
                     severity = "medium" if affected_count > 100 else "low"
 
                     examples = "\n".join(
@@ -622,16 +726,18 @@ class SpecializedTools:
                         for r in extreme_lengths
                     )
 
-                    anomalies.append({
-                        "type": "length_pattern",
-                        "severity": severity,
-                        "title": f"Unusual Length Patterns in {column}",
-                        "impact": "Potential data truncation or corruption",
-                        "affected_records": affected_count,
-                        "description": "Found values with extreme lengths",
-                        "examples": examples,
-                        "recommendation": "Review data input validation and field constraints",
-                    })
+                    anomalies.append(
+                        {
+                            "type": "length_pattern",
+                            "severity": severity,
+                            "title": f"Unusual Length Patterns in {column}",
+                            "impact": "Potential data truncation or corruption",
+                            "affected_records": affected_count,
+                            "description": "Found values with extreme lengths",
+                            "examples": examples,
+                            "recommendation": "Review data input validation and field constraints",
+                        }
+                    )
             except Exception:
                 # Skip columns that can't be analyzed
                 continue
@@ -647,8 +753,12 @@ class SpecializedTools:
         try:
             # Check for zero/negative values in amount columns
             amount_columns = [
-                col for col in schema
-                if any(term in col["column_name"].lower() for term in ["amount", "charge", "price"])
+                col
+                for col in schema
+                if any(
+                    term in col["column_name"].lower()
+                    for term in ["amount", "charge", "price"]
+                )
             ]
 
             for column_info in amount_columns:
@@ -656,31 +766,36 @@ class SpecializedTools:
 
                 try:
                     zero_query = f"""
-                        SELECT COUNT(*) as zero_count  
+                        SELECT COUNT(*) as zero_count
                         FROM {table_name}
                         WHERE {column} = 0
                     """
 
                     zero_result = await self.server.execute_query(zero_query)
-                    zero_count = zero_result[0].get("zero_count", 0) or 0 if zero_result else 0
+                    zero_count = (
+                        zero_result[0].get("zero_count", 0) or 0 if zero_result else 0
+                    )
 
                     if zero_count > 50:
                         severity = "high" if zero_count > 500 else "medium"
-                        anomalies.append({
-                            "type": "business_logic",
-                            "severity": severity,
-                            "title": f"Excessive Zero Values in {column}",
-                            "impact": "Revenue loss, processing errors",
-                            "affected_records": zero_count,
-                            "description": f"{zero_count} records with zero charges - potential pricing or billing errors",
-                            "recommendation": "Review billing logic and pricing rules",
-                        })
+                        anomalies.append(
+                            {
+                                "type": "business_logic",
+                                "severity": severity,
+                                "title": f"Excessive Zero Values in {column}",
+                                "impact": "Revenue loss, processing errors",
+                                "affected_records": zero_count,
+                                "description": f"{zero_count} records with zero charges - potential pricing or billing errors",
+                                "recommendation": "Review billing logic and pricing rules",
+                            }
+                        )
                 except Exception:
                     continue
 
             # Check for date consistency
             date_columns = [
-                col for col in schema
+                col
+                for col in schema
                 if any(t in col["column_type"].upper() for t in ["DATE", "TIMESTAMP"])
             ]
 
@@ -696,20 +811,28 @@ class SpecializedTools:
                           AND {date_col1} > {date_col2}
                     """
 
-                    invalid_order_result = await self.server.execute_query(date_order_query)
-                    invalid_order_count = invalid_order_result[0].get("invalid_order_count", 0) or 0 if invalid_order_result else 0
+                    invalid_order_result = await self.server.execute_query(
+                        date_order_query
+                    )
+                    invalid_order_count = (
+                        invalid_order_result[0].get("invalid_order_count", 0) or 0
+                        if invalid_order_result
+                        else 0
+                    )
 
                     if invalid_order_count > 0:
                         severity = "high" if invalid_order_count > 100 else "medium"
-                        anomalies.append({
-                            "type": "business_logic",
-                            "severity": severity,
-                            "title": "Invalid Date Sequence",
-                            "impact": "Data integrity, timeline analysis errors",
-                            "affected_records": invalid_order_count,
-                            "description": f"{invalid_order_count} records where {date_col1} > {date_col2}",
-                            "recommendation": "Review data entry process and add validation constraints",
-                        })
+                        anomalies.append(
+                            {
+                                "type": "business_logic",
+                                "severity": severity,
+                                "title": "Invalid Date Sequence",
+                                "impact": "Data integrity, timeline analysis errors",
+                                "affected_records": invalid_order_count,
+                                "description": f"{invalid_order_count} records where {date_col1} > {date_col2}",
+                                "recommendation": "Review data entry process and add validation constraints",
+                            }
+                        )
                 except Exception:
                     pass
 
@@ -718,7 +841,3 @@ class SpecializedTools:
             pass
 
         return anomalies
-
-
-# Import asyncio for concurrent execution
-import asyncio
