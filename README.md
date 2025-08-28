@@ -19,8 +19,8 @@ The best CSV and Excel analyst that pulls everything into DuckDB in order to pro
 ### Local Installation
 
 **Prerequisites:**
-- **Python 3.12+** (required)
-- **uv** package manager (recommended)
+- **Python 3.12+** (required - for modern type hints, performance improvements, and security features)
+- **uv** package manager (recommended - fastest Python package manager)
 
 ```bash
 # Install uv (if not already installed)
@@ -29,8 +29,11 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Install dependencies
 uv sync
 
-# Run the server
-uv run python -m quack_mcp.server
+# Run the MCP server (via module)
+uv run python -m quack_mcp
+
+# Alternative: Run via installed script (after uv sync)
+uv run quack-mcp
 ```
 
 **Why Python 3.12 and uv:**
@@ -67,10 +70,14 @@ docker-compose up quack-mcp-dev
 
 ### Local Usage
 
-The server runs via stdin/stdout transport for MCP protocol:
+The MCP server runs via stdin/stdout transport using the MCP protocol:
 
 ```bash
-uv run python -m quack_mcp.server
+# Run via module
+uv run python -m quack_mcp
+
+# Or run via installed script
+uv run quack-mcp
 ```
 
 ### Docker Usage
@@ -353,7 +360,7 @@ For local installation, add the following to your Claude Code MCP configuration 
   "mcpServers": {
     "quack-csv": {
       "command": "uv",
-      "args": ["run", "python", "-m", "quack_mcp.server"],
+      "args": ["run", "python", "-m", "quack_mcp"],
       "cwd": "/absolute/path/to/quack-mcp",
       "env": {}
     }
@@ -689,7 +696,7 @@ If Claude Code can't find the MCP server:
 
 **Local Installation:**
 1. Check that the path in your configuration is absolute and correct
-2. Verify Node.js is installed and accessible
+2. Verify Python 3.12+ and uv are installed and accessible
 3. Restart Claude Code after configuration changes
 
 **Docker Installation:**
@@ -747,7 +754,7 @@ For other MCP clients, add to your configuration:
   "mcpServers": {
     "quack-mcp": {
       "command": "uv",
-      "args": ["run", "python", "-m", "quack_mcp.server"],
+      "args": ["run", "python", "-m", "quack_mcp"],
       "cwd": "/path/to/quack-mcp"
     }
   }
@@ -796,10 +803,10 @@ We'd love your help making Quack MCP even better! 🦆 Whether you're fixing a b
 ### Getting Started
 
 1. **Fork the repository** and clone it locally
-2. **Install dependencies**: `uv sync`
+2. **Install dependencies**: `uv sync --group dev` (includes development tools)
 3. **Make your changes** following our coding conventions (see `CLAUDE.md`)
 4. **Test your changes**: `uv run pytest`
-5. **Run code quality checks**: `uv run ruff check && uv run pyright`
+5. **Run code quality checks**: `uv run ruff check --fix && uv run pyright`
 6. **Submit a pull request** with a clear description
 
 ### What We're Looking For
@@ -815,7 +822,7 @@ We'd love your help making Quack MCP even better! 🦆 Whether you're fixing a b
 - **Follow Python type hints** - We use strict typing with pyright for reliability
 - **Use Pydantic models** - All tool inputs should use Pydantic for validation
 - **Write tests** - New features should include pytest tests with proper fixtures
-- **Run quality checks** - Use `uv run ruff check` for linting and `uv run pyright` for type checking
+- **Run quality checks** - Use `uv run ruff check --fix` for linting and `uv run pyright` for type checking
 - **Keep it simple** - Clear, readable code is preferred
 - **Document your changes** - Update README.md if you add new features
 
