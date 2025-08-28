@@ -12,11 +12,11 @@ services:
       # Mount additional CSV files from host if needed
       - ./csv-data:/app/csv-data:ro
     environment:
-      - NODE_ENV=production
+      - PYTHONPATH=/app/src
     stdin_open: true
     tty: true
     # For stdio transport, we need to keep stdin/stdout available
-    command: ["node", "src/index.ts"]
+    command: ["uv", "run", "python", "-m", "quack_mcp.server"]
     
   # Optional: Development service with hot reload
   quack-mcp-dev:
@@ -25,11 +25,12 @@ services:
       dockerfile: Dockerfile
     container_name: quack-mcp-dev
     volumes:
-      - ./src:/app/src:ro
+      - ./src:/app/src:rw
       - ./data:/app/data:ro
       - ./csv-data:/app/csv-data:ro
     environment:
-      - NODE_ENV=development
+      - PYTHONPATH=/app/src
     stdin_open: true
     tty: true
-    command: ["node", "--watch", "src/index.ts"]
+    # For development, we can use watchfiles for hot reload
+    command: ["uv", "run", "watchfiles", "--ignore-paths", ".git", "python", "-m", "quack_mcp.server", "src/"]

@@ -1,31 +1,45 @@
-FROM node:24.5.0-alpine
+FROM python:3.12-slim AS builder
 
-# Install build dependencies for native modules (DuckDB)
-RUN apk add --no-cache \
-    python3 \
-    make \
-    g++ \
-    libc6-compat
+# Install system dependencies for DuckDB
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create app directory
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Change the working directory to the `app` directory
 WORKDIR /app
 
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
-
-# Copy package files
-COPY package*.json ./
-
 # Install dependencies
-RUN npm ci --only=production && npm cache clean --force
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --locked --no-install-project --no-editable
 
-# Copy source code
-COPY --chown=nodejs:nodejs src/ ./src/
-COPY --chown=nodejs:nodejs tsconfig.json ./
+# Copy the project into the intermediate image
+ADD . /app
+
+# Sync the project
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-editable
+
+FROM python:3.12-slim
+
+# Create non-root user
+RUN groupadd --gid 1001 appuser && \
+    useradd --uid 1001 --gid 1001 --create-home appuser
+
+# Copy the virtual environment from builder
+COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
+
+# Copy the project source
+COPY --from=builder --chown=appuser:appuser /app/src /app/src
+COPY --from=builder --chown=appuser:appuser /app/pyproject.toml /app/pyproject.toml
+
+WORKDIR /app
 
 # Switch to non-root user
-USER nodejs
+USER appuser
 
-# Start the application
-CMD ["node", "src/index.ts"]
+# Run the application
+CMD ["/app/.venv/bin/python", "-m", "quack_mcp.server"]
