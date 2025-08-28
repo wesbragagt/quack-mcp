@@ -9,3 +9,7 @@
 
 # Include data directory for sample CSV files
 !data/
+!./pyproject.toml
+!./uv.lock
+!./src
+!./README.md
